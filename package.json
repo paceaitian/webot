@@ -1,0 +1,40 @@
+{
+  "name": "webot",
+  "version": "0.1.0",
+  "description": "碎片收集系统 — 飞书机器人 → 网页抓取 → Claude 摘要 → Obsidian 笔记",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "dev:cli": "tsx src/index.ts --cli",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@larksuiteoapi/node-sdk": "^1.24.0",
+    "@mozilla/readability": "^0.5.0",
+    "better-sqlite3": "^12.0.0",
+    "cheerio": "^1.0.0",
+    "dotenv": "^16.4.0",
+    "gray-matter": "^4.0.3",
+    "jsdom": "^25.0.0",
+    "nanoid": "^5.0.0",
+    "pino": "^9.0.0",
+    "pino-pretty": "^13.0.0",
+    "playwright": "^1.51.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/jsdom": "^21.0.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
