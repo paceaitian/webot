@@ -51,11 +51,13 @@ export interface ExtractedContent {
 export interface ProcessedResult {
   /** 笔记标题 */
   title: string
-  /** 摘要 */
+  /** L0 摘要（≤80 字） */
   summary: string
+  /** L1 要点（300-500 字 Markdown） */
+  keyPoints: string
   /** 标签列表 */
   tags: string[]
-  /** 处理后的正文（Markdown） */
+  /** L2 详情（完整 Markdown 正文） */
   content: string
   /** 使用的 AI 模型 */
   model: string
@@ -83,6 +85,10 @@ export interface PipelineContext {
   stage: PipelineStage
   /** 当前状态 */
   status: PipelineStatus
+  /** 数据库 Job ID（用于二次处理） */
+  jobId?: string
+  /** 是否为二次处理（reprocess 不显示交互按钮） */
+  isReprocess?: boolean
   /** 解析结果 */
   parsed?: ParsedMessage
   /** 抓取结果 */

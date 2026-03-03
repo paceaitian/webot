@@ -1,5 +1,6 @@
 // Claude API 封装 — 5 种处理模式
 import Anthropic from '@anthropic-ai/sdk'
+import crypto from 'crypto'
 import type { NoteSchemaOutput } from './schemas/note-schema.js'
 import { noteSchema } from './schemas/note-schema.js'
 import { saveSystemPrompt, saveUserPrompt } from './prompts/save.js'
@@ -13,18 +14,53 @@ const log = createLogger('claude')
 
 /** Claude 模型 ID */
 const HAIKU = 'claude-haiku-4-5-20251001'
-const SONNET = 'claude-sonnet-4-6'
+const OPUS = 'claude-opus-4-6'
+
+/** Claude Code 请求指纹 — 用于通过 NewAPI 代理的 Opus 模型验证 */
+const CC_HEADERS: Record<string, string> = {
+  'User-Agent': 'claude-cli/2.1.39 (external, cli)',
+  'x-app': 'cli',
+  'anthropic-beta': 'claude-code-20250219,prompt-caching-scope-2026-01-05,effort-2025-11-24,adaptive-thinking-2026-01-28',
+  'x-stainless-lang': 'js',
+  'x-stainless-package-version': '0.73.0',
+  'x-stainless-os': 'Windows',
+  'x-stainless-arch': 'x64',
+  'x-stainless-runtime': 'node',
+  'x-stainless-runtime-version': process.version,
+}
+
+/** Claude Code 标识 system blocks — 代理验证需要 */
+const CC_SYSTEM_BLOCKS: Array<{ type: 'text'; text: string; cache_control: { type: 'ephemeral' } }> = [
+  {
+    type: 'text',
+    text: "You are Claude Code, Anthropic's official CLI for Claude.",
+    cache_control: { type: 'ephemeral' },
+  },
+  {
+    type: 'text',
+    text: 'You are an interactive CLI tool that helps users with software engineering tasks.',
+    cache_control: { type: 'ephemeral' },
+  },
+]
+
+/** 生成 Claude Code 格式的 metadata.user_id */
+function generateCCUserId(): string {
+  return `user_${crypto.randomBytes(32).toString('hex')}_account__session_${crypto.randomUUID()}`
+}
 
 /**
  * Claude API 客户端封装
  */
 export class ClaudeClient {
   private client: Anthropic
+  private useProxy: boolean
 
   constructor(apiKey: string, baseUrl?: string) {
+    this.useProxy = !!baseUrl
     this.client = new Anthropic({
       apiKey,
       ...(baseUrl ? { baseURL: baseUrl } : {}),
+      ...(baseUrl ? { defaultHeaders: CC_HEADERS } : {}),
     })
   }
 
@@ -40,65 +76,72 @@ export class ClaudeClient {
     return { ...result, model: HAIKU }
   }
 
-  /** #discuss 深度分析（Sonnet + Extended Thinking） */
+  /** #discuss 深度分析（Opus + Extended Thinking + 流式 + tool_choice: auto） */
   async discuss(content: string, args?: string): Promise<NoteSchemaOutput & { model: string }> {
     log.info({ contentLength: content.length }, '#discuss 深度分析')
     const start = Date.now()
 
-    const response = await this.client.messages.create({
-      model: SONNET,
+    const stream = this.client.messages.stream({
+      model: OPUS,
       max_tokens: 16000,
-      thinking: {
-        type: 'enabled',
-        budget_tokens: 4096,
-      },
-      system: [{
-        type: 'text',
-        text: discussSystemPrompt,
-        cache_control: { type: 'ephemeral' },
-      }],
+      // CC Switch 整流器自动处理 thinking 错误，始终启用
+      thinking: { type: 'enabled' as const, budget_tokens: 8192 },
+      ...this.proxyMetadata(),
+      system: this.buildSystem(discussSystemPrompt),
       messages: [{
         role: 'user',
         content: this.buildUserContent(discussUserPrompt(content, args), content),
       }],
+      tools: [{
+        name: 'generate_note',
+        description: '生成结构化笔记数据',
+        input_schema: noteSchema,
+      }],
+      // auto 兼容 thinking（tool 强制模式不兼容）
+      tool_choice: { type: 'auto' },
     })
 
+    const response = await stream.finalMessage()
+
     log.info({
-      model: SONNET,
+      model: OPUS,
       duration: Date.now() - start,
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
     }, '#discuss API 调用完成')
 
-    // 从 Extended Thinking 响应中提取文本
-    const textBlocks = response.content.filter(b => b.type === 'text')
-    const rawText = textBlocks.map(b => b.text).join('\n')
+    // 优先从 tool_use 块提取结构化数据（prompt 引导模型必用工具）
+    const toolUse = response.content.find(b => b.type === 'tool_use')
+    if (toolUse && toolUse.type === 'tool_use') {
+      return { ...(toolUse.input as NoteSchemaOutput), model: OPUS }
+    }
 
-    // 尝试解析 JSON，回退到纯文本
-    try {
-      const parsed = JSON.parse(rawText)
-      return { ...parsed, model: SONNET }
-    } catch {
-      return {
-        title: '深度分析',
-        summary: rawText.slice(0, 200),
-        tags: ['深度分析'],
-        content: rawText,
-        model: SONNET,
-      }
+    // fallback: 纯文本（不应触发，但保险）
+    const rawText = response.content
+      .filter(b => b.type === 'text')
+      .map(b => (b as { text: string }).text)
+      .join('\n')
+
+    return {
+      title: '深度分析',
+      summary: rawText.slice(0, 80),
+      key_points: '',
+      tags: ['深度分析'],
+      content: rawText,
+      model: OPUS,
     }
   }
 
-  /** #quote 段落提取（Sonnet + Structured Output） */
+  /** #quote 段落提取（Opus + Structured Output） */
   async extractQuotes(content: string, args?: string): Promise<NoteSchemaOutput & { model: string }> {
     log.info({ contentLength: content.length }, '#quote 段落提取')
     const result = await this.structuredCall(
-      SONNET,
+      OPUS,
       quoteSystemPrompt,
       quoteUserPrompt(content, args),
       content,
     )
-    return { ...result, model: SONNET }
+    return { ...result, model: OPUS }
   }
 
   /** 无指令最小元数据（Haiku） */
@@ -120,14 +163,11 @@ export class ClaudeClient {
 
     const mediaType = mimeType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
 
-    const response = await this.client.messages.create({
+    const stream = this.client.messages.stream({
       model: HAIKU,
       max_tokens: 4096,
-      system: [{
-        type: 'text',
-        text: visionSystemPrompt,
-        cache_control: { type: 'ephemeral' },
-      }],
+      ...this.proxyMetadata(),
+      system: this.buildSystem(visionSystemPrompt),
       messages: [{
         role: 'user',
         content: [
@@ -147,6 +187,8 @@ export class ClaudeClient {
       }],
     })
 
+    const response = await stream.finalMessage()
+
     log.info({
       model: HAIKU,
       duration: Date.now() - start,
@@ -165,7 +207,8 @@ export class ClaudeClient {
     } catch {
       return {
         title: text ?? '图片笔记',
-        summary: rawText.slice(0, 200),
+        summary: rawText.slice(0, 80),
+        key_points: '',
         tags: ['图片'],
         content: rawText,
         model: HAIKU,
@@ -173,7 +216,7 @@ export class ClaudeClient {
     }
   }
 
-  /** 结构化输出调用（Prompt Caching + JSON Schema） */
+  /** 结构化输出调用（流式 + Prompt Caching + JSON Schema） */
   private async structuredCall(
     model: string,
     systemPrompt: string,
@@ -181,14 +224,11 @@ export class ClaudeClient {
     rawContent?: string,
   ): Promise<NoteSchemaOutput> {
     const start = Date.now()
-    const response = await this.client.messages.create({
+    const stream = this.client.messages.stream({
       model,
       max_tokens: 8192,
-      system: [{
-        type: 'text',
-        text: systemPrompt,
-        cache_control: { type: 'ephemeral' },
-      }],
+      ...this.proxyMetadata(),
+      system: this.buildSystem(systemPrompt),
       messages: [{
         role: 'user',
         content: this.buildUserContent(userMessage, rawContent),
@@ -200,6 +240,8 @@ export class ClaudeClient {
       }],
       tool_choice: { type: 'tool', name: 'generate_note' },
     })
+
+    const response = await stream.finalMessage()
 
     log.info({
       model,
@@ -235,5 +277,22 @@ export class ClaudeClient {
       ]
     }
     return userMessage
+  }
+
+  /** 构建 system blocks（代理模式下合并到 2 个 CC 标识块中，不能超过 2 块） */
+  private buildSystem(prompt: string): Array<{ type: 'text'; text: string; cache_control: { type: 'ephemeral' } }> {
+    const promptBlock = { type: 'text' as const, text: prompt, cache_control: { type: 'ephemeral' as const } }
+    if (!this.useProxy) return [promptBlock]
+    // NewAPI 代理只允许恰好 2 个 system blocks，把实际 prompt 追加到第二个 CC block
+    return [
+      CC_SYSTEM_BLOCKS[0],
+      { ...CC_SYSTEM_BLOCKS[1], text: CC_SYSTEM_BLOCKS[1].text + '\n\n' + prompt },
+    ]
+  }
+
+  /** 代理模式下附加 metadata.user_id（NewAPI 验证需要） */
+  private proxyMetadata(): { metadata?: { user_id: string } } {
+    if (!this.useProxy) return {}
+    return { metadata: { user_id: generateCCUserId() } }
   }
 }

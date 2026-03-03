@@ -31,6 +31,7 @@ export class AIProcessor implements Processor {
       return {
         title: result.title,
         summary: result.summary,
+        keyPoints: result.key_points,
         tags: result.tags,
         content: result.content,
         model: result.model,
@@ -63,6 +64,7 @@ export class AIProcessor implements Processor {
     return {
       title: result.title,
       summary: result.summary,
+      keyPoints: result.key_points,
       tags: result.tags,
       content: result.content,
       model: result.model,

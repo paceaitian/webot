@@ -49,21 +49,32 @@ export class ObsidianWriter implements Writer {
       } satisfies NoteFrontmatter).filter(([, v]) => v !== undefined),
     ) as unknown as NoteFrontmatter
 
-    // 处理附件引用
-    let content = processed.content
+    // 构建 L0/L1/L2 分层内容
+    let body = ''
+
+    // 附件引用
     if (context.extracted?.images && context.extracted.images.length > 0) {
       await mkdir(this.attachmentDir, { recursive: true })
-      const imageRefs = context.extracted.images
+      body += context.extracted.images
         .map(img => `![[${img}]]`)
-        .join('\n')
-      content = `${imageRefs}\n\n${content}`
+        .join('\n') + '\n\n'
     }
 
-    const noteData: NoteData = { frontmatter, content }
+    // L1 要点（key_points 非空时生成 ## 摘要 章节）
+    if (processed.keyPoints) {
+      body += `## 摘要\n\n${processed.keyPoints}\n\n`
+    }
+
+    // L2 详情
+    body += `## 详情\n\n${processed.content}`
+
+    const noteData: NoteData = { frontmatter, content: body }
     const markdown = stringifyNote(noteData)
 
-    // 生成安全文件名
-    const filename = this.sanitizeFilename(processed.title)
+    // 生成安全文件名（含指令前缀）
+    const command = context.parsed?.command.type ?? 'none'
+    const prefix = command !== 'none' ? `[${command}] ` : ''
+    const filename = `${prefix}${this.sanitizeFilename(processed.title)}`
     let filePath = join(this.inboxDir, `${filename}.md`)
 
     // 冲突处理：同名追加 nanoid 后缀

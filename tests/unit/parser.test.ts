@@ -112,11 +112,32 @@ describe('parseMessage', () => {
     }
   })
 
-  it('解析纯 URL（无指令）', () => {
+  it('纯 URL（无指令）默认走 save', () => {
     const raw = makeRaw('https://example.com')
     const result = parseMessage(raw)
-    expect(result.command.type).toBe('none')
+    expect(result.command.type).toBe('save')
     expect(result.content.type).toBe('url')
+  })
+
+  it('URL + 文本（无指令）默认走 save', () => {
+    const raw = makeRaw('https://example.com/article 这篇不错')
+    const result = parseMessage(raw)
+    expect(result.command.type).toBe('save')
+    expect(result.content.type).toBe('mixed')
+  })
+
+  it('#discuss + URL 保持 discuss（不被覆盖为 save）', () => {
+    const raw = makeRaw('#discuss https://example.com/deep')
+    const result = parseMessage(raw)
+    expect(result.command.type).toBe('discuss')
+    expect(result.content.type).toBe('url')
+  })
+
+  it('纯文本无指令保持 none（不受 URL 默认影响）', () => {
+    const raw = makeRaw('这是普通文本，没有链接')
+    const result = parseMessage(raw)
+    expect(result.command.type).toBe('none')
+    expect(result.content.type).toBe('text')
   })
 
   it('解析图片消息', () => {

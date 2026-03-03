@@ -62,7 +62,7 @@ export class FeishuResponder implements Responder {
     const summary = ctx.processed?.summary ?? ''
     const filePath = ctx.written?.filePath ?? ''
 
-    const elements = [
+    const elements: Record<string, unknown>[] = [
       { tag: 'div', text: { tag: 'plain_text', content: summary } },
     ]
 
@@ -77,6 +77,57 @@ export class FeishuResponder implements Responder {
       elements.push({
         tag: 'div',
         text: { tag: 'plain_text', content: '⚠️ AI 处理失败，已保存为草稿' },
+      })
+    }
+
+    // 非草稿 + 有 jobId + 非二次处理时添加交互按钮
+    if (!isDraft && ctx.jobId && !ctx.isReprocess) {
+      const jobId = ctx.jobId
+
+      // 分隔线
+      elements.push({ tag: 'hr' })
+
+      // 操作按钮组
+      elements.push({
+        tag: 'action',
+        actions: [
+          {
+            tag: 'button',
+            text: { tag: 'plain_text', content: '🔍 深度分析' },
+            type: 'primary',
+            value: { jobId, command: 'discuss' },
+          },
+          {
+            tag: 'button',
+            text: { tag: 'plain_text', content: '💎 提取金句' },
+            type: 'default',
+            value: { jobId, command: 'quote' },
+          },
+        ],
+      })
+
+      // 自定义需求表单（tag 必须是 "form"，非 "form_container"）
+      elements.push({
+        tag: 'form',
+        name: 'custom_request',
+        elements: [
+          {
+            tag: 'input',
+            name: 'user_input',
+            placeholder: { tag: 'plain_text', content: '输入自定义处理需求...' },
+            label: { tag: 'plain_text', content: '自定义需求' },
+            label_position: 'top',
+            max_length: 200,
+          },
+          {
+            tag: 'button',
+            text: { tag: 'plain_text', content: '发送' },
+            type: 'primary',
+            action_type: 'form_submit',
+            name: 'submit_custom',
+            value: { jobId, command: 'custom' },
+          },
+        ],
       })
     }
 

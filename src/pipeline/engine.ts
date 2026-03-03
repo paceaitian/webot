@@ -1,4 +1,5 @@
 // 管道引擎 — 调度 + 部分失败保存 + 阶段跳过
+import { existsSync, unlinkSync } from 'node:fs'
 import type {
   RawMessage,
   PipelineContext,
@@ -7,6 +8,7 @@ import type {
   WrittenNote,
   ParsedMessage,
   PipelineStage,
+  CommandType,
 } from '../types/index.js'
 import { createContext } from './context.js'
 import { parseMessage } from '../parser/message-parser.js'
@@ -67,6 +69,7 @@ export class PipelineEngine {
       // 持久化消息
       const messageId = this.messageRepo.insert(raw)
       jobId = this.jobRepo.create(messageId)
+      ctx.jobId = jobId
 
       // 阶段 2: 解析
       ctx.stage = 'parse'
@@ -107,6 +110,11 @@ export class PipelineEngine {
         }
       }
 
+      // 缓存抓取结果（供 reprocess 复用，避免重复抓取）
+      if (ctx.extracted && jobId) {
+        this.jobRepo.saveExtracted(jobId, JSON.stringify(ctx.extracted))
+      }
+
       // 阶段 4: AI 处理（部分失败保存）
       ctx.stage = 'process'
       if (this.processor && ctx.extracted) {
@@ -120,18 +128,25 @@ export class PipelineEngine {
           ctx.processed = {
             title: ctx.extracted.title,
             summary: '',
+            keyPoints: '',
             tags: ['draft'],
             content: ctx.extracted.content,
             model: 'none',
             isDraft: true,
           }
           ctx.status = 'draft'
+          // 调度重试（草稿也需要自动重试）
+          if (jobId) {
+            this.jobRepo.scheduleRetry(jobId)
+            log.info({ jobId }, '草稿已调度重试')
+          }
         }
       } else if (ctx.extracted) {
         // 无 Processor，构造最小结果
         ctx.processed = {
           title: ctx.extracted.title,
           summary: '',
+          keyPoints: '',
           tags: ['inbox'],
           content: ctx.extracted.content,
           model: 'none',
@@ -232,6 +247,20 @@ export class PipelineEngine {
         if (ctx.status === 'completed' || ctx.status === 'draft') {
           // 重试成功，更新原 job
           this.jobRepo.updateStatus(job.id, ctx.status, 'respond')
+
+          // 删除旧草稿文件（重试成功后覆盖）
+          if (ctx.status === 'completed' && job.result_json) {
+            try {
+              const oldResult = JSON.parse(job.result_json) as { filePath?: string }
+              if (oldResult.filePath && existsSync(oldResult.filePath)) {
+                unlinkSync(oldResult.filePath)
+                log.info({ oldFile: oldResult.filePath }, '已删除旧草稿文件')
+              }
+            } catch (e) {
+              log.warn({ error: String(e) }, '删除旧草稿文件失败（可忽略）')
+            }
+          }
+
           log.info({ jobId: job.id }, '重试成功')
           retried++
         }
@@ -241,5 +270,129 @@ export class PipelineEngine {
     }
 
     return retried
+  }
+
+  /**
+   * 二次处理 — 用新指令重新处理已完成的任务
+   */
+  async reprocess(
+    jobId: string,
+    newCommand: string,
+    responder: Responder,
+    userInput?: string,
+  ): Promise<PipelineContext> {
+    // 查找原始任务和消息
+    const job = this.jobRepo.getById(jobId)
+    if (!job) throw new Error(`Job ${jobId} not found`)
+
+    const msg = this.messageRepo.getById(job.message_id)
+    if (!msg) throw new Error(`Message for job ${jobId} not found`)
+
+    // 重建 RawMessage（使用唯一 eventId 避免去重）
+    const contentData = JSON.parse(msg.content_json) as { rawText: string }
+    const raw: RawMessage = {
+      eventId: `reprocess-${msg.event_id}-${Date.now()}`,
+      source: msg.source as RawMessage['source'],
+      rawText: contentData.rawText,
+      receivedAt: new Date(msg.received_at),
+    }
+
+    const ctx = createContext(raw)
+    ctx.status = 'running'
+    ctx.jobId = jobId
+    ctx.isReprocess = true
+
+    log.info({ jobId, newCommand, userInput }, '二次处理开始')
+
+    try {
+      // 解析并覆盖指令
+      ctx.stage = 'parse'
+      await responder.onProgress(ctx, '解析消息...')
+      ctx.parsed = parseMessage(raw)
+
+      const commandType = (newCommand === 'custom' ? 'discuss' : newCommand) as CommandType
+      ctx.parsed.command = { type: commandType, args: userInput }
+
+      // 抓取内容（优先读缓存，避免重复抓取）
+      ctx.stage = 'extract'
+      const cachedExtracted = this.jobRepo.getExtracted(jobId)
+      if (cachedExtracted) {
+        ctx.extracted = JSON.parse(cachedExtracted) as ExtractedContent
+        log.info({ jobId }, '使用缓存的抓取内容')
+      } else if (ctx.parsed.content.type === 'url' || ctx.parsed.content.type === 'mixed') {
+        const url = ctx.parsed.content.url
+        if (this.extractor) {
+          await responder.onProgress(ctx, `抓取内容: ${url}`)
+          ctx.extracted = await this.extractor.extract(ctx.parsed)
+        } else {
+          ctx.extracted = {
+            title: url,
+            content: `来源: ${url}`,
+            url,
+            contentType: 'article',
+          }
+        }
+      } else if (ctx.parsed.content.type === 'text') {
+        ctx.extracted = {
+          title: ctx.parsed.content.text.slice(0, 50),
+          content: ctx.parsed.content.text,
+          contentType: 'text',
+        }
+      }
+
+      // AI 处理（使用新指令）
+      ctx.stage = 'process'
+      if (this.processor && ctx.extracted) {
+        await responder.onProgress(ctx, 'AI 处理中...')
+        ctx.processed = await this.processor.process(ctx.parsed, ctx.extracted)
+      }
+
+      // 写入新笔记
+      ctx.stage = 'write'
+      if (this.writer && ctx.processed) {
+        await responder.onProgress(ctx, '写入 Obsidian...')
+        ctx.written = await this.writer.write(ctx.processed, ctx)
+      }
+
+      // 删除原笔记文件（新文件路径不同时）
+      if (job.result_json) {
+        try {
+          const oldResult = JSON.parse(job.result_json) as { filePath?: string }
+          if (oldResult.filePath && ctx.written?.filePath !== oldResult.filePath && existsSync(oldResult.filePath)) {
+            unlinkSync(oldResult.filePath)
+            log.info({ oldFile: oldResult.filePath }, '已删除原笔记文件')
+          }
+        } catch (e) {
+          log.warn({ error: String(e) }, '删除原笔记文件失败（可忽略）')
+        }
+      }
+
+      // 更新任务状态
+      ctx.stage = 'respond'
+      ctx.status = 'completed'
+      ctx.completedAt = new Date()
+
+      this.jobRepo.updateStatus(jobId, 'completed', 'respond')
+      if (ctx.processed) {
+        this.jobRepo.saveResult(jobId, JSON.stringify({
+          title: ctx.processed.title,
+          tags: ctx.processed.tags,
+          filePath: ctx.written?.filePath,
+        }))
+      }
+
+      await responder.onComplete(ctx)
+      log.info({ jobId, newCommand, duration: Date.now() - ctx.startedAt.getTime() }, '二次处理完成')
+
+    } catch (error) {
+      ctx.status = 'failed'
+      ctx.error = String(error)
+      ctx.completedAt = new Date()
+      log.error({ jobId, error: ctx.error }, '二次处理失败')
+
+      await responder.onError(ctx, error instanceof Error ? error : new Error(String(error)))
+    }
+
+    return ctx
   }
 }

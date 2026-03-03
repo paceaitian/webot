@@ -42,6 +42,13 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    version: 2,
+    description: 'jobs 表新增 extracted_json 缓存列',
+    up(db) {
+      db.exec('ALTER TABLE jobs ADD COLUMN extracted_json TEXT')
+    },
+  },
 ]
 
 /**

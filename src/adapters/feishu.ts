@@ -9,7 +9,7 @@ import { createLogger } from '../utils/logger.js'
 const log = createLogger('feishu-adapter')
 
 /**
- * 飞书适配器 — WebSocket 长连接接收消息
+ * 飞书适配器 — WebSocket 长连接接收消息 + 卡片回调
  */
 export class FeishuAdapter extends BaseAdapter {
   private client: lark.Client
@@ -36,18 +36,39 @@ export class FeishuAdapter extends BaseAdapter {
   }
 
   async start(): Promise<void> {
-    // 注册消息事件处理
-    this.wsClient.start({
-      eventDispatcher: new lark.EventDispatcher({}).register({
-        'im.message.receive_v1': async (data) => {
-          try {
-            await this.handleMessage(data)
-          } catch (error) {
-            log.error({ error: String(error) }, '消息处理异常')
+    const eventDispatcher = new lark.EventDispatcher({}).register({
+      'im.message.receive_v1': async (data) => {
+        try {
+          await this.handleMessage(data)
+        } catch (error) {
+          log.error({ error: String(error) }, '消息处理异常')
+        }
+      },
+      // 新版卡片回调事件（飞书后台「事件与回调」→「卡片回调」→「长连接」）
+      'card.action.trigger': async (data: unknown) => {
+        try {
+          await this.handleCardAction(data as unknown as Record<string, unknown>)
+          return {
+            toast: {
+              type: 'success' as const,
+              content: '操作已受理',
+              i18n: { zh_cn: '操作已受理', en_us: 'Action accepted' },
+            },
           }
-        },
-      }),
+        } catch (error) {
+          log.error({ error: String(error) }, '卡片回调处理异常')
+          return {
+            toast: {
+              type: 'error' as const,
+              content: '处理失败',
+              i18n: { zh_cn: '处理失败', en_us: 'Action failed' },
+            },
+          }
+        }
+      },
     })
+
+    await this.wsClient.start({ eventDispatcher })
 
     log.info('飞书 WebSocket 已连接，等待消息...')
   }
@@ -168,6 +189,37 @@ export class FeishuAdapter extends BaseAdapter {
     } catch {
       return contentStr
     }
+  }
+
+  /** 处理卡片交互回调（按钮点击/表单提交） */
+  private async handleCardAction(data: Record<string, unknown>): Promise<void> {
+    const action = data.action as { value?: Record<string, string>; tag?: string; form_value?: Record<string, string> } | undefined
+    if (!action?.value) return
+
+    // 新版回调 action.value 已是 object，直接取值
+    const { jobId, command } = action.value as { jobId?: string; command?: string }
+    if (!jobId || !command) return
+
+    // 新版回调 open_chat_id 在 context 中
+    const context = data.context as { open_chat_id?: string; open_message_id?: string } | undefined
+    const chatId = context?.open_chat_id ?? (data.open_chat_id as string) ?? ''
+    log.info({ jobId, command, chatId }, '收到卡片交互回调')
+
+    // 获取用户自定义输入（表单提交时）
+    const userInput = command === 'custom' ? action.form_value?.user_input : undefined
+
+    // 创建响应器反馈进度
+    const responder = new FeishuResponder(this.client, chatId, '')
+    await responder.sendProcessingCard()
+
+    // 异步执行二次处理
+    setImmediate(async () => {
+      try {
+        await this.pipeline.reprocess(jobId, command, responder, userInput)
+      } catch (error) {
+        log.error({ jobId, command, error: String(error) }, '二次处理失败')
+      }
+    })
   }
 
   /** 获取飞书客户端（供外部使用） */

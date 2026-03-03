@@ -20,13 +20,18 @@ export function parseMessage(raw: RawMessage): ParsedMessage {
   const text = raw.rawText.trim()
 
   // 解析指令
-  const command = parseCommand(text)
+  let command = parseCommand(text)
 
   // 移除指令部分，获取剩余文本
   const textWithoutCommand = removeCommand(text)
 
   // 解析内容类型
   const content = parseContent(raw, textWithoutCommand)
+
+  // URL/mixed 内容无显式指令时，默认走 #save 摘要
+  if (command.type === 'none' && (content.type === 'url' || content.type === 'mixed')) {
+    command.type = 'save'
+  }
 
   return { raw, command, content }
 }

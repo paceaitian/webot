@@ -10,6 +10,7 @@ export interface JobRow {
   status: string
   stage: string | null
   result_json: string | null
+  extracted_json: string | null
   error_text: string | null
   retry_count: number
   next_retry_at: string | null
@@ -45,12 +46,12 @@ export class JobRepo {
     ).run(resultJson, new Date().toISOString(), jobId)
   }
 
-  /** 获取可重试的任务 */
+  /** 获取可重试的任务（包含 failed 和 draft 状态） */
   getRetryable(): JobRow[] {
     const now = new Date().toISOString()
     return this.db.prepare(
-      'SELECT * FROM jobs WHERE status = ? AND next_retry_at <= ? AND retry_count < 3'
-    ).all('failed', now) as JobRow[]
+      'SELECT * FROM jobs WHERE status IN (?, ?) AND next_retry_at <= ? AND retry_count < 3'
+    ).all('failed', 'draft', now) as JobRow[]
   }
 
   /** 调度重试（指数退避：1min/2min/4min） */
@@ -64,6 +65,19 @@ export class JobRepo {
     this.db.prepare(
       'UPDATE jobs SET status = ?, retry_count = retry_count + 1, next_retry_at = ?, updated_at = ? WHERE id = ?'
     ).run('failed', nextRetry, new Date().toISOString(), jobId)
+  }
+
+  /** 保存抓取内容缓存 */
+  saveExtracted(jobId: string, json: string): void {
+    this.db.prepare(
+      'UPDATE jobs SET extracted_json = ?, updated_at = ? WHERE id = ?'
+    ).run(json, new Date().toISOString(), jobId)
+  }
+
+  /** 获取抓取内容缓存 */
+  getExtracted(jobId: string): string | null {
+    const row = this.db.prepare('SELECT extracted_json FROM jobs WHERE id = ?').get(jobId) as { extracted_json: string | null } | undefined
+    return row?.extracted_json ?? null
   }
 
   /** 根据 ID 获取任务 */
