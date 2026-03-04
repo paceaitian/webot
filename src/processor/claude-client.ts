@@ -59,6 +59,7 @@ export class ClaudeClient {
     this.useProxy = !!baseUrl
     this.client = new Anthropic({
       apiKey,
+      timeout: 120_000,  // 全局 120s 超时（discuss 可能较慢）
       ...(baseUrl ? { baseURL: baseUrl } : {}),
       ...(baseUrl ? { defaultHeaders: CC_HEADERS } : {}),
     })
@@ -77,9 +78,12 @@ export class ClaudeClient {
   }
 
   /** #discuss 深度分析（Opus + Extended Thinking + 流式 + tool_choice: auto） */
-  async discuss(content: string, args?: string): Promise<NoteSchemaOutput & { model: string }> {
+  async discuss(content: string, args?: string, onProgress?: (message: string) => void): Promise<NoteSchemaOutput & { model: string }> {
     log.info({ contentLength: content.length }, '#discuss 深度分析')
     const start = Date.now()
+
+    // U1: 通知开始深度思考
+    onProgress?.('Opus 深度思考中...')
 
     const stream = this.client.messages.stream({
       model: OPUS,
@@ -99,6 +103,15 @@ export class ClaudeClient {
       }],
       // auto 兼容 thinking（tool 强制模式不兼容）
       tool_choice: { type: 'auto' },
+    }, { timeout: 300_000 })  // Opus+thinking 需要更长超时
+
+    // U1: 检测 tool_use 阶段，报告生成进度
+    let generatingReported = false
+    stream.on('inputJson', () => {
+      if (!generatingReported) {
+        generatingReported = true
+        onProgress?.('AI 生成笔记...')
+      }
     })
 
     const response = await stream.finalMessage()
@@ -156,7 +169,7 @@ export class ClaudeClient {
     return { ...result, model: HAIKU }
   }
 
-  /** 图片描述（Haiku + Vision） */
+  /** 图片描述（Haiku + Vision + Structured Output） */
   async describeImage(imageBuffer: Buffer, mimeType: string, text?: string): Promise<NoteSchemaOutput & { model: string }> {
     log.info({ mimeType, hasText: !!text, imageSize: imageBuffer.length }, '图片描述生成')
     const start = Date.now()
@@ -185,6 +198,13 @@ export class ClaudeClient {
           },
         ],
       }],
+      // A5: 使用 tool_use 获取结构化输出
+      tools: [{
+        name: 'generate_note',
+        description: '生成结构化笔记数据',
+        input_schema: noteSchema,
+      }],
+      tool_choice: { type: 'tool', name: 'generate_note' },
     })
 
     const response = await stream.finalMessage()
@@ -196,23 +216,25 @@ export class ClaudeClient {
       outputTokens: response.usage.output_tokens,
     }, 'Vision API 调用完成')
 
+    // 优先从 tool_use 提取结构化数据
+    const toolUse = response.content.find(b => b.type === 'tool_use')
+    if (toolUse && toolUse.type === 'tool_use') {
+      return { ...(toolUse.input as NoteSchemaOutput), model: HAIKU }
+    }
+
+    // fallback: 纯文本解析（不应触发）
     const rawText = response.content
       .filter(b => b.type === 'text')
-      .map(b => b.text)
+      .map(b => (b as { text: string }).text)
       .join('\n')
 
-    try {
-      const parsed = JSON.parse(rawText)
-      return { ...parsed, model: HAIKU }
-    } catch {
-      return {
-        title: text ?? '图片笔记',
-        summary: rawText.slice(0, 80),
-        key_points: '',
-        tags: ['图片'],
-        content: rawText,
-        model: HAIKU,
-      }
+    return {
+      title: text ?? '图片笔记',
+      summary: rawText.slice(0, 80),
+      key_points: '',
+      tags: ['图片'],
+      content: rawText,
+      model: HAIKU,
     }
   }
 

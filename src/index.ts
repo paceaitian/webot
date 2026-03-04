@@ -23,11 +23,17 @@ async function main() {
   const messageRepo = new MessageRepo(db.db)
   const jobRepo = new JobRepo(db.db)
 
+  // 崩溃恢复：将上次未完成的 running 任务重置为 failed
+  const resetCount = jobRepo.resetRunning()
+  if (resetCount > 0) {
+    log.info({ count: resetCount }, '崩溃恢复：已重置 running 任务为 failed')
+  }
+
   // 初始化 Writer（用于获取附件目录）
   const writer = new ObsidianWriter(config.obsidianVaultPath)
 
-  // 初始化 Extractor（传入附件目录供图片下载）
-  const extractor = new ContentExtractor(writer.getAttachmentDir())
+  // 初始化 Extractor（共享 BrowserPool）
+  const extractor = new ContentExtractor()
 
   // 初始化 AI Processor
   const processor = new AIProcessor(config.anthropicApiKey, config.anthropicBaseUrl || undefined)

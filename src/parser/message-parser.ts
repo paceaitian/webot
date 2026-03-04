@@ -1,8 +1,8 @@
 // 消息解析器 — 指令解析 + URL 提取 + 内容分类
 import type { RawMessage, MessageContent, Command, CommandType, ParsedMessage } from '../types/index.js'
 
-/** 指令正则：仅匹配 #save / #discuss / #quote 关键词 */
-const COMMAND_KEYWORD_REGEX = /^#(save|discuss|quote)\b/i
+/** 指令正则：匹配 #save / #discuss / #quote / #help 关键词 */
+const COMMAND_KEYWORD_REGEX = /^#(save|discuss|quote|help)\b/i
 
 /** 指令参数正则：匹配指令后的非 URL 文本参数 */
 const COMMAND_ARGS_REGEX = /^#(?:save|discuss|quote)\s+((?:(?!https?:\/\/).)+)/i

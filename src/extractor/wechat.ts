@@ -1,11 +1,7 @@
 // 微信公众号专用抓取器
-import type { Browser } from 'playwright'
-import { chromium } from 'playwright'
 import type { ExtractedContent } from '../types/index.js'
+import type { BrowserPool } from './browser-pool.js'
 import { createLogger } from '../utils/logger.js'
-import { mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { shortId } from '../utils/id.js'
 
 const log = createLogger('wechat')
 
@@ -17,28 +13,14 @@ const WECHAT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 
  * 处理 JS 渲染、懒加载图片、元数据提取
  */
 export class WechatExtractor {
-  private browser: Browser | null = null
-
-  async init(): Promise<void> {
-    if (this.browser) return
-    this.browser = await chromium.launch({ headless: true })
-    log.info('微信抓取器浏览器已启动')
-  }
-
-  async close(): Promise<void> {
-    if (this.browser) {
-      await this.browser.close()
-      this.browser = null
-    }
-  }
+  constructor(private pool: BrowserPool) {}
 
   /**
    * 抓取微信公众号文章
    */
-  async extract(url: string, attachmentDir?: string): Promise<ExtractedContent> {
-    await this.init()
-
-    const context = await this.browser!.newContext({
+  async extract(url: string): Promise<ExtractedContent> {
+    const browser = await this.pool.getBrowser()
+    const context = await browser.newContext({
       userAgent: WECHAT_UA,
     })
 
@@ -88,40 +70,10 @@ export class WechatExtractor {
         return el?.innerText ?? ''
       })
 
-      // 提取图片列表
-      const imageUrls = await page.evaluate(() => {
-        const imgs = document.querySelectorAll('#js_content img')
-        return Array.from(imgs).map(img => {
-          const dataSrc = img.getAttribute('data-src')
-          const src = img.getAttribute('src')
-          return dataSrc || src || ''
-        }).filter(Boolean)
-      })
-
-      // 下载图片（如果提供附件目录）
-      const localImages: string[] = []
-      if (attachmentDir && imageUrls.length > 0) {
-        mkdirSync(attachmentDir, { recursive: true })
-        for (const imgUrl of imageUrls.slice(0, 20)) {
-          try {
-            const response = await context.request.get(imgUrl)
-            const buffer = await response.body()
-            const filename = `img-${shortId()}.png`
-            const filepath = join(attachmentDir, filename)
-            writeFileSync(filepath, buffer)
-            localImages.push(filename)
-          } catch (imgError) {
-            log.warn({ imgUrl, error: String(imgError) }, '图片下载失败')
-          }
-        }
-      }
-
       log.info({
         url,
         title: metadata.title,
         author: metadata.author,
-        images: imageUrls.length,
-        downloaded: localImages.length,
       }, '微信文章提取成功')
 
       return {
@@ -131,7 +83,6 @@ export class WechatExtractor {
         author: metadata.author || undefined,
         publishedAt: metadata.publishTime || undefined,
         siteName: metadata.author || '微信公众号',
-        images: localImages.length > 0 ? localImages : undefined,
         contentType: 'article',
       }
     } finally {

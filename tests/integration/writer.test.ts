@@ -122,7 +122,7 @@ describe('ObsidianWriter 集成测试', () => {
     expect(basename.length).toBeLessThanOrEqual(100)
   })
 
-  it('附件引用：图片以 ![[]] 语法插入', async () => {
+  it('IMG 移除：图片不再嵌入笔记', async () => {
     const ctx = makeContext({
       extracted: {
         title: '图文文章',
@@ -136,8 +136,9 @@ describe('ObsidianWriter 集成测试', () => {
     const result = await writer.write(processed, ctx)
     const content = readFileSync(result.filePath, 'utf-8')
 
-    expect(content).toContain('![[img-abc.png]]')
-    expect(content).toContain('![[img-def.png]]')
+    // 图片嵌入已移除（公众号垃圾图片污染 vault）
+    expect(content).not.toContain('![[img-abc.png]]')
+    expect(content).not.toContain('![[img-def.png]]')
   })
 
   it('无 .tmp 残留文件', async () => {

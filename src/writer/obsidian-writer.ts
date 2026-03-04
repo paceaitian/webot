@@ -46,19 +46,13 @@ export class ObsidianWriter implements Writer {
         ai_model: processed.model,
         author: context.extracted?.author,
         published_at: context.extracted?.publishedAt,
+        site_name: context.extracted?.siteName,
+        word_count: processed.content ? processed.content.length : undefined,
       } satisfies NoteFrontmatter).filter(([, v]) => v !== undefined),
     ) as unknown as NoteFrontmatter
 
     // 构建 L0/L1/L2 分层内容
     let body = ''
-
-    // 附件引用
-    if (context.extracted?.images && context.extracted.images.length > 0) {
-      await mkdir(this.attachmentDir, { recursive: true })
-      body += context.extracted.images
-        .map(img => `![[${img}]]`)
-        .join('\n') + '\n\n'
-    }
 
     // L1 要点（key_points 非空时生成 ## 摘要 章节）
     if (processed.keyPoints) {
@@ -73,7 +67,7 @@ export class ObsidianWriter implements Writer {
 
     // 生成安全文件名（含指令前缀）
     const command = context.parsed?.command.type ?? 'none'
-    const prefix = command !== 'none' ? `[${command}] ` : ''
+    const prefix = (command !== 'none' && command !== 'help') ? `[${command}] ` : ''
     const filename = `${prefix}${this.sanitizeFilename(processed.title)}`
     let filePath = join(this.inboxDir, `${filename}.md`)
 

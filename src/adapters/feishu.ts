@@ -2,7 +2,7 @@
 import * as lark from '@larksuiteoapi/node-sdk'
 import { BaseAdapter } from './base.js'
 import { FeishuResponder } from '../responder/feishu.js'
-import type { RawMessage } from '../types/index.js'
+import type { RawMessage, CommandType } from '../types/index.js'
 import type { PipelineEngine } from '../pipeline/engine.js'
 import { createLogger } from '../utils/logger.js'
 
@@ -205,6 +205,12 @@ export class FeishuAdapter extends BaseAdapter {
     const chatId = context?.open_chat_id ?? (data.open_chat_id as string) ?? ''
     log.info({ jobId, command, chatId }, '收到卡片交互回调')
 
+    // 提取 mode：按钮直接携带；表单从 form_value 获取；旧卡片兼容默认 replace
+    const actionValue = action.value as Record<string, string>
+    const mode = actionValue.mode
+      ?? (command === 'custom' ? action.form_value?.mode : undefined)
+      ?? 'replace'  // 旧卡片无 mode 字段时保持原行为
+
     // 获取用户自定义输入（表单提交时）
     const userInput = command === 'custom' ? action.form_value?.user_input : undefined
 
@@ -215,7 +221,10 @@ export class FeishuAdapter extends BaseAdapter {
     // 异步执行二次处理
     setImmediate(async () => {
       try {
-        await this.pipeline.reprocess(jobId, command, responder, userInput)
+        await this.pipeline.reprocess(jobId, command as CommandType | 'custom', responder, {
+          userInput,
+          replaceOriginal: mode === 'replace',
+        })
       } catch (error) {
         log.error({ jobId, command, error: String(error) }, '二次处理失败')
       }

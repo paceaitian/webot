@@ -5,6 +5,7 @@ import { isWechatUrl } from '../parser/message-parser.js'
 import { extractWithReadability } from './readability.js'
 import { PlaywrightExtractor } from './playwright.js'
 import { WechatExtractor } from './wechat.js'
+import { BrowserPool } from './browser-pool.js'
 import { createLogger } from '../utils/logger.js'
 
 const log = createLogger('extractor')
@@ -15,23 +16,13 @@ const log = createLogger('extractor')
  * - 其他 URL → Readability 优先 → 失败降级 Playwright
  */
 export class ContentExtractor implements Extractor {
-  private playwrightExtractor = new PlaywrightExtractor()
-  private wechatExtractor = new WechatExtractor()
-  private attachmentDir?: string
+  private pool = new BrowserPool()
+  private playwrightExtractor = new PlaywrightExtractor(this.pool)
+  private wechatExtractor = new WechatExtractor(this.pool)
 
-  constructor(attachmentDir?: string) {
-    this.attachmentDir = attachmentDir
-  }
-
-  /** 初始化浏览器实例 */
-  async init(): Promise<void> {
-    // 懒初始化，按需启动浏览器
-  }
-
-  /** 关闭所有浏览器 */
+  /** 关闭共享浏览器 */
   async close(): Promise<void> {
-    await this.playwrightExtractor.close()
-    await this.wechatExtractor.close()
+    await this.pool.close()
   }
 
   /**
@@ -49,7 +40,7 @@ export class ContentExtractor implements Extractor {
     // 微信公众号专用路径
     if (isWechatUrl(url)) {
       log.info({ url }, '使用微信专用抓取器')
-      const result = await this.wechatExtractor.extract(url, this.attachmentDir)
+      const result = await this.wechatExtractor.extract(url)
       log.info({ url, duration: Date.now() - start, extractor: 'wechat' }, '抓取完成')
       return result
     }

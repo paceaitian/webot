@@ -2,7 +2,7 @@
 import type { MessageContent, MessageSource, RawMessage } from './message.js'
 
 /** 指令类型 */
-export type CommandType = 'save' | 'discuss' | 'quote' | 'none'
+export type CommandType = 'save' | 'discuss' | 'quote' | 'help' | 'none'
 
 /** 解析后的指令 */
 export interface Command {
@@ -41,8 +41,6 @@ export interface ExtractedContent {
   publishedAt?: string
   /** 来源站点名（如公众号名称） */
   siteName?: string
-  /** 图片列表（本地路径） */
-  images?: string[]
   /** 内容类型标识 */
   contentType: 'article' | 'text' | 'image'
 }

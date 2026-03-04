@@ -16,7 +16,7 @@ export class AIProcessor implements Processor {
     this.claude = new ClaudeClient(apiKey, baseUrl)
   }
 
-  async process(parsed: ParsedMessage, extracted: ExtractedContent): Promise<ProcessedResult> {
+  async process(parsed: ParsedMessage, extracted: ExtractedContent, onProgress?: (message: string) => void): Promise<ProcessedResult> {
     const { command, content } = parsed
 
     log.info({ command: command.type, contentType: extracted.contentType }, 'AI 处理开始')
@@ -43,19 +43,26 @@ export class AIProcessor implements Processor {
     const contentText = extracted.content
     let result
 
+    // S3: 长文截断（避免 Opus 成本失控）
+    const maxLen = command.type === 'discuss' ? 40_000 : 20_000
+    const truncatedText = contentText.length > maxLen
+      ? contentText.slice(0, maxLen) + '\n\n[... 内容已截断]'
+      : contentText
+
     switch (command.type) {
       case 'save':
-        result = await this.claude.summarize(contentText, command.args)
+        result = await this.claude.summarize(truncatedText, command.args)
         break
       case 'discuss':
-        result = await this.claude.discuss(contentText, command.args)
+        result = await this.claude.discuss(truncatedText, command.args, onProgress)
         break
       case 'quote':
-        result = await this.claude.extractQuotes(contentText, command.args)
+        result = await this.claude.extractQuotes(truncatedText, command.args)
         break
+      case 'help':
       case 'none':
       default:
-        result = await this.claude.minimal(contentText)
+        result = await this.claude.minimal(truncatedText)
         break
     }
 

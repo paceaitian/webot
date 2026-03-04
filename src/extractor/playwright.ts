@@ -1,36 +1,20 @@
 // Playwright 通用浏览器抓取器
-import { chromium, type Browser } from 'playwright'
 import type { ExtractedContent } from '../types/index.js'
+import type { BrowserPool } from './browser-pool.js'
 import { createLogger } from '../utils/logger.js'
 
 const log = createLogger('playwright')
 
 /**
- * Playwright 抓取器 — 单例 Browser + 按需 Context
+ * Playwright 抓取器 — 使用共享 BrowserPool
  */
 export class PlaywrightExtractor {
-  private browser: Browser | null = null
-
-  /** 初始化浏览器实例 */
-  async init(): Promise<void> {
-    if (this.browser) return
-    this.browser = await chromium.launch({ headless: true })
-    log.info('Playwright 浏览器已启动')
-  }
-
-  /** 关闭浏览器 */
-  async close(): Promise<void> {
-    if (this.browser) {
-      await this.browser.close()
-      this.browser = null
-      log.info('Playwright 浏览器已关闭')
-    }
-  }
+  constructor(private pool: BrowserPool) {}
 
   /** 抓取通用网页 */
   async extract(url: string): Promise<ExtractedContent> {
-    await this.init()
-    const context = await this.browser!.newContext()
+    const browser = await this.pool.getBrowser()
+    const context = await browser.newContext()
 
     try {
       const page = await context.newPage()

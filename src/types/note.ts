@@ -22,6 +22,10 @@ export interface NoteFrontmatter {
   author?: string
   /** 发布时间 */
   published_at?: string
+  /** 站点名称 */
+  site_name?: string
+  /** 正文字数 */
+  word_count?: number
 }
 
 /** 完整笔记数据（Frontmatter + 正文） */

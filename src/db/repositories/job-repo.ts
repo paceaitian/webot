@@ -80,6 +80,14 @@ export class JobRepo {
     return row?.extracted_json ?? null
   }
 
+  /** 崩溃恢复：将所有 running 状态的任务重置为 failed */
+  resetRunning(): number {
+    const result = this.db.prepare(
+      "UPDATE jobs SET status = 'failed', updated_at = ? WHERE status = 'running'"
+    ).run(new Date().toISOString())
+    return result.changes
+  }
+
   /** 根据 ID 获取任务 */
   getById(jobId: string): JobRow | undefined {
     return this.db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId) as JobRow | undefined
