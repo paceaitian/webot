@@ -191,25 +191,40 @@ export class FeishuAdapter extends BaseAdapter {
     }
   }
 
-  /** 处理卡片交互回调（按钮点击/表单提交） */
+  /** 处理卡片交互回调（按钮点击/overflow 选择/表单提交） */
   private async handleCardAction(data: Record<string, unknown>): Promise<void> {
-    const action = data.action as { value?: Record<string, string>; tag?: string; form_value?: Record<string, string> } | undefined
+    const action = data.action as {
+      value?: Record<string, string>
+      tag?: string
+      option?: string         // overflow 选中项的 value 字符串
+      form_value?: Record<string, string>
+    } | undefined
     if (!action?.value) return
 
-    // 新版回调 action.value 已是 object，直接取值
-    const { jobId, command } = action.value as { jobId?: string; command?: string }
+    const actionValue = action.value as Record<string, string>
+    const jobId = actionValue.jobId
+    let command = actionValue.command
+    let mode: string | undefined = actionValue.mode
+
+    // overflow 回调：command 和 mode 从 option 字符串解析（如 'discuss_replace'）
+    if (!command && action.option && typeof action.option === 'string') {
+      const sep = action.option.indexOf('_')
+      command = sep > 0 ? action.option.slice(0, sep) : action.option
+      mode = sep > 0 ? action.option.slice(sep + 1) : 'replace'
+    }
+
     if (!jobId || !command) return
 
     // 新版回调 open_chat_id 在 context 中
     const context = data.context as { open_chat_id?: string; open_message_id?: string } | undefined
     const chatId = context?.open_chat_id ?? (data.open_chat_id as string) ?? ''
-    log.info({ jobId, command, chatId }, '收到卡片交互回调')
+    log.info({ jobId, command, chatId, mode }, '收到卡片交互回调')
 
-    // 提取 mode：按钮直接携带；表单从 form_value 获取；旧卡片兼容默认 replace
-    const actionValue = action.value as Record<string, string>
-    const mode = actionValue.mode
-      ?? (command === 'custom' ? action.form_value?.mode : undefined)
-      ?? 'replace'  // 旧卡片无 mode 字段时保持原行为
+    // 表单兼容：从 form_value 获取 mode
+    if (!mode && command === 'custom') {
+      mode = action.form_value?.mode
+    }
+    mode = mode ?? 'replace'  // 旧卡片无 mode 字段时保持原行为
 
     // 获取用户自定义输入（表单提交时）
     const userInput = command === 'custom' ? action.form_value?.user_input : undefined
