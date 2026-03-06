@@ -1,5 +1,7 @@
 // 环境变量配置加载与校验
-import 'dotenv/config'
+import { config as dotenvConfig } from 'dotenv'
+// override: .env 文件优先于系统环境变量
+dotenvConfig({ override: true })
 
 /** 应用配置 */
 export interface AppConfig {

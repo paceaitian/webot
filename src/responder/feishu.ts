@@ -1,5 +1,5 @@
-// 飞书卡片进度反馈响应器
 import { basename } from 'node:path'
+import { writeFileSync } from 'node:fs'
 import type { Client } from '@larksuiteoapi/node-sdk'
 import type { Responder } from './base.js'
 import type { PipelineContext } from '../types/index.js'
@@ -34,10 +34,21 @@ function formatTime(date: Date): string {
 }
 
 /**
- * 飞书响应器 — 通过卡片消息反馈处理进度
+ * 飞书响应器 — CardKit 流式卡片反馈处理进度
+ *
+ * 生命周期：sendProcessingCard() → onProgress() x N → onComplete/onError()
+ * 使用 cardkit.v1 API 实现打字机效果的流式渲染
  */
 export class FeishuResponder implements Responder {
-  private cardMessageId: string | null = null
+  /** CardKit 卡片实体 ID */
+  private cardId: string | null = null
+  /** CardKit API 严格递增序列号 */
+  private seq = 0
+  /** 累积进度行（平台自动计算增量实现打字机效果） */
+  private progressLines: string[] = []
+
+  /** 获取下一个序列号 */
+  private nextSeq(): number { return ++this.seq }
 
   constructor(
     private client: Client,
@@ -48,69 +59,152 @@ export class FeishuResponder implements Responder {
     void _replyMessageId
   }
 
-  /** 发送"处理中"卡片 */
+  /** 创建流式卡片实体并发送到聊天 */
   async sendProcessingCard(): Promise<void> {
     try {
-      const resp = await this.client.im.v1.message.create({
+      // 1. 构建初始流式卡片 JSON
+      const cardJson = {
+        schema: '2.0',
+        config: {
+          streaming_mode: true,
+          summary: { content: '处理中...' },
+          streaming_config: {
+            print_frequency_ms: { default: 50 },
+            print_step: { default: 2 },
+            print_strategy: 'fast',
+          },
+        },
+        header: {
+          title: { tag: 'plain_text', content: '处理中' },
+          template: 'blue',
+        },
+        body: {
+          direction: 'vertical',
+          padding: '12px 12px 12px 12px',
+          elements: [{
+            tag: 'markdown',
+            content: '正在接收消息...',
+            element_id: 'progress_text',
+          }],
+        },
+      }
+
+      // 2. 创建卡片实体
+      const resp = await this.client.cardkit.v1.card.create({
+        data: { type: 'card_json', data: JSON.stringify(cardJson) },
+      })
+      this.cardId = resp.data?.card_id ?? null
+
+      if (!this.cardId) {
+        log.warn('CardKit 创建卡片未返回 card_id')
+        return
+      }
+
+      // 3. 发送卡片消息
+      await this.client.im.v1.message.create({
         params: { receive_id_type: 'chat_id' },
         data: {
           receive_id: this.chatId,
           msg_type: 'interactive',
-          content: JSON.stringify(this.buildSimpleCard('处理中', '正在接收消息...', 'blue')),
+          content: JSON.stringify({ type: 'card', data: { card_id: this.cardId } }),
         },
       })
-      this.cardMessageId = resp.data?.message_id ?? null
     } catch (error) {
       log.warn({ error: String(error) }, '发送处理中卡片失败')
     }
   }
 
+  /** 流式更新进度文本（打字机效果） */
   async onProgress(_ctx: PipelineContext, message: string): Promise<void> {
-    if (!this.cardMessageId) return
+    if (!this.cardId) return
     try {
-      await this.client.im.v1.message.patch({
-        path: { message_id: this.cardMessageId },
-        data: {
-          content: JSON.stringify(this.buildSimpleCard('处理中', message, 'blue')),
-        },
+      // 累积进度行，推送全量文本（平台自动计算增量逐字渲染）
+      this.progressLines.push(message)
+      const fullText = this.progressLines.join('\n')
+
+      await this.client.cardkit.v1.cardElement.content({
+        data: { content: fullText, sequence: this.nextSeq() },
+        path: { card_id: this.cardId, element_id: 'progress_text' },
       })
     } catch (error) {
       log.warn({ error: String(error) }, '更新进度卡片失败')
     }
   }
 
+  /** 全量更新为最终状态卡片 + 关闭流式模式 */
   async onComplete(ctx: PipelineContext): Promise<void> {
-    if (!this.cardMessageId) return
+    if (!this.cardId) return
 
     const card = ctx.status === 'draft'
       ? this.buildDraftCard(ctx)
       : this.buildCompleteCard(ctx)
 
+    // 导出 .card 文件用于在飞书 CardKit 搭建工具中预览
     try {
-      await this.client.im.v1.message.patch({
-        path: { message_id: this.cardMessageId },
-        data: { content: JSON.stringify(card) },
+      const cardFile = { name: 'webot-preview', dsl: card, variables: [] }
+      writeFileSync('feishu-card-preview.card', JSON.stringify(cardFile, null, 2), 'utf-8')
+      log.info('飞书卡片已导出至 feishu-card-preview.card')
+    } catch (exportError) {
+      log.warn({ error: String(exportError) }, '导出飞书卡片失败')
+    }
+
+    try {
+      // 1. 全量更新卡片内容（header + body 一步到位）
+      await this.client.cardkit.v1.card.update({
+        data: {
+          card: { type: 'card_json' as const, data: JSON.stringify(card) },
+          sequence: this.nextSeq(),
+        },
+        path: { card_id: this.cardId },
+      })
+
+      // 2. 关闭流式模式 + 设置 summary 预览文本
+      const title = ctx.processed?.title ?? '处理完成'
+      await this.client.cardkit.v1.card.settings({
+        data: {
+          settings: JSON.stringify({
+            config: { streaming_mode: false, summary: { content: title } },
+          }),
+          sequence: this.nextSeq(),
+        },
+        path: { card_id: this.cardId },
       })
     } catch (error) {
       log.warn({ error: String(error) }, '更新完成卡片失败')
     }
   }
 
+  /** 错误卡片 + 关闭流式模式 */
   async onError(_ctx: PipelineContext, error: Error): Promise<void> {
-    if (!this.cardMessageId) return
+    if (!this.cardId) return
     try {
-      await this.client.im.v1.message.patch({
-        path: { message_id: this.cardMessageId },
+      const errorCard = this.buildSimpleCard('处理失败', this.friendlyError(error.message), 'red')
+
+      // 1. 全量更新为错误卡片
+      await this.client.cardkit.v1.card.update({
         data: {
-          content: JSON.stringify(this.buildSimpleCard('处理失败', this.friendlyError(error.message), 'red')),
+          card: { type: 'card_json' as const, data: JSON.stringify(errorCard) },
+          sequence: this.nextSeq(),
         },
+        path: { card_id: this.cardId },
+      })
+
+      // 2. 关闭流式模式
+      await this.client.cardkit.v1.card.settings({
+        data: {
+          settings: JSON.stringify({
+            config: { streaming_mode: false, summary: { content: '处理失败' } },
+          }),
+          sequence: this.nextSeq(),
+        },
+        path: { card_id: this.cardId },
       })
     } catch (patchError) {
       log.warn({ error: String(patchError) }, '更新错误卡片失败')
     }
   }
 
-  /** 构建完成卡片（富文本排版） */
+  /** 构建完成卡片（布局同步自 webot.card CardKit 搭建工具设计） */
   private buildCompleteCard(ctx: PipelineContext): Record<string, unknown> {
     const title = ctx.processed?.title ?? '处理完成'
     const summary = ctx.processed?.summary ?? ''
@@ -173,6 +267,7 @@ export class FeishuResponder implements Responder {
         ).join(' ')
         columns.push({
           tag: 'column', width: 'weighted', weight: 1,
+          vertical_spacing: '8px', horizontal_align: 'left', vertical_align: 'top',
           elements: [{ tag: 'markdown', content: tagStr }],
         })
       }
@@ -180,6 +275,7 @@ export class FeishuResponder implements Responder {
       if (filePath) {
         columns.push({
           tag: 'column', width: 'weighted', weight: 1,
+          vertical_spacing: '8px', horizontal_align: 'left', vertical_align: 'top',
           elements: [{
             tag: 'markdown',
             text_align: 'right',
@@ -188,7 +284,7 @@ export class FeishuResponder implements Responder {
         })
       }
 
-      elements.push({ tag: 'column_set', flex_mode: 'none', columns })
+      elements.push({ tag: 'column_set', horizontal_align: 'left', columns })
     }
 
     // 交互按钮（v2 schema，自适应宽度）
@@ -197,17 +293,18 @@ export class FeishuResponder implements Responder {
       // 第一行：新建模式
       elements.push({
         tag: 'column_set',
-        flex_mode: 'none',
+        horizontal_align: 'left',
         columns: [
           {
-            tag: 'column', width: 'auto',
+            tag: 'column', width: 'weighted', weight: 1,
+            vertical_spacing: '8px', horizontal_align: 'left', vertical_align: 'top',
             elements: [{
               tag: 'button',
               text: { tag: 'plain_text', content: '深度分析' },
-              type: 'primary',
+              type: 'primary_filled',
               size: 'small',
-              width: 'default',
-              value: { jobId, command: 'discuss', mode: 'new' },
+              width: 'fill',
+              behaviors: [{ type: 'callback', value: { jobId, command: 'discuss', mode: 'new' } }],
               confirm: {
                 title: { tag: 'plain_text', content: '确认深度分析' },
                 text: { tag: 'plain_text', content: '将使用 Opus 模型，耗时约 1-2 分钟。确认？' },
@@ -215,33 +312,34 @@ export class FeishuResponder implements Responder {
             }],
           },
           {
-            tag: 'column', width: 'auto',
+            tag: 'column', width: 'weighted', weight: 1,
+            vertical_spacing: '8px', horizontal_align: 'left', vertical_align: 'top',
             elements: [{
               tag: 'button',
               text: { tag: 'plain_text', content: '提取金句' },
-              type: 'primary',
+              type: 'primary_filled',
               size: 'small',
-              width: 'default',
-              value: { jobId, command: 'quote', mode: 'new' },
+              width: 'fill',
+              behaviors: [{ type: 'callback', value: { jobId, command: 'quote', mode: 'new' } }],
             }],
           },
         ],
       })
       // 第二行：替换模式
-      elements.push({ tag: 'markdown', content: "<font color='grey'>以下将替换原笔记</font>" })
       elements.push({
         tag: 'column_set',
-        flex_mode: 'none',
+        horizontal_align: 'left',
         columns: [
           {
-            tag: 'column', width: 'auto',
+            tag: 'column', width: 'weighted', weight: 1,
+            vertical_spacing: '8px', horizontal_align: 'left', vertical_align: 'top',
             elements: [{
               tag: 'button',
               text: { tag: 'plain_text', content: '分析(替换)' },
-              type: 'primary',
+              type: 'primary_filled',
               size: 'small',
-              width: 'default',
-              value: { jobId, command: 'discuss', mode: 'replace' },
+              width: 'fill',
+              behaviors: [{ type: 'callback', value: { jobId, command: 'discuss', mode: 'replace' } }],
               confirm: {
                 title: { tag: 'plain_text', content: '确认替换' },
                 text: { tag: 'plain_text', content: '将使用 Opus 模型并替换原笔记。确认？' },
@@ -249,14 +347,15 @@ export class FeishuResponder implements Responder {
             }],
           },
           {
-            tag: 'column', width: 'auto',
+            tag: 'column', width: 'weighted', weight: 1,
+            vertical_spacing: '8px', horizontal_align: 'left', vertical_align: 'top',
             elements: [{
               tag: 'button',
               text: { tag: 'plain_text', content: '金句(替换)' },
-              type: 'primary',
+              type: 'primary_filled',
               size: 'small',
-              width: 'default',
-              value: { jobId, command: 'quote', mode: 'replace' },
+              width: 'fill',
+              behaviors: [{ type: 'callback', value: { jobId, command: 'quote', mode: 'replace' } }],
             }],
           },
         ],
@@ -265,20 +364,24 @@ export class FeishuResponder implements Responder {
       elements.push({
         tag: 'form',
         name: 'custom_form',
+        direction: 'vertical',
         elements: [
           {
             tag: 'column_set',
-            flex_mode: 'none',
+            horizontal_align: 'left',
             columns: [
               {
                 tag: 'column', width: 'auto',
+                vertical_spacing: '8px', horizontal_align: 'left', vertical_align: 'top',
                 elements: [{
                   tag: 'select_static',
                   name: 'mode',
-                  placeholder: { tag: 'plain_text', content: '默认：新建笔记' },
+                  type: 'default',
+                  width: 'fill',
+                  placeholder: { tag: 'plain_text', content: '新建' },
                   options: [
-                    { text: { tag: 'plain_text', content: '新建笔记' }, value: 'new' },
-                    { text: { tag: 'plain_text', content: '替换原笔记' }, value: 'replace' },
+                    { text: { tag: 'plain_text', content: '新建' }, value: 'new' },
+                    { text: { tag: 'plain_text', content: '替换' }, value: 'replace' },
                   ],
                 }],
               },
@@ -287,20 +390,23 @@ export class FeishuResponder implements Responder {
                 elements: [{
                   tag: 'input',
                   name: 'user_input',
+                  width: 'fill',
+                  default_value: '',
                   placeholder: { tag: 'plain_text', content: '输入自定义分析指令...' },
                 }],
               },
               {
                 tag: 'column', width: 'auto',
+                vertical_spacing: '8px', horizontal_align: 'left', vertical_align: 'top',
                 elements: [{
                   tag: 'button',
                   text: { tag: 'plain_text', content: '发送' },
-                  type: 'primary',
+                  type: 'primary_filled',
                   size: 'small',
-                  width: 'default',
-                  action_type: 'form_submit',
+                  width: 'fill',
+                  form_action_type: 'submit',
                   name: 'submit',
-                  value: { jobId, command: 'custom' },
+                  behaviors: [{ type: 'callback', value: { jobId, command: 'custom' } }],
                 }],
               },
             ],
@@ -319,7 +425,7 @@ export class FeishuResponder implements Responder {
       content: `<font color='grey'>${noteParts.join(' · ')}</font>`,
     })
 
-    return { schema: '2.0', header, body: { elements } }
+    return { schema: '2.0', config: { update_multi: true }, header, body: { direction: 'vertical', elements } }
   }
 
   /** 构建草稿卡片 */
@@ -341,28 +447,30 @@ export class FeishuResponder implements Responder {
     if (ctx.jobId) {
       elements.push({
         tag: 'column_set',
-        flex_mode: 'none',
+        horizontal_align: 'left',
         columns: [
           {
-            tag: 'column', width: 'auto',
+            tag: 'column', width: 'weighted', weight: 1,
+            vertical_spacing: '8px', horizontal_align: 'left', vertical_align: 'top',
             elements: [{
               tag: 'button',
               text: { tag: 'plain_text', content: '重新处理' },
-              type: 'primary',
+              type: 'primary_filled',
               size: 'small',
-              width: 'default',
-              value: { jobId: ctx.jobId, command: 'save', mode: 'replace' },
+              width: 'fill',
+              behaviors: [{ type: 'callback', value: { jobId: ctx.jobId, command: 'save', mode: 'replace' } }],
             }],
           },
           {
-            tag: 'column', width: 'auto',
+            tag: 'column', width: 'weighted', weight: 1,
+            vertical_spacing: '8px', horizontal_align: 'left', vertical_align: 'top',
             elements: [{
               tag: 'button',
               text: { tag: 'plain_text', content: '深度分析' },
-              type: 'primary',
+              type: 'primary_filled',
               size: 'small',
-              width: 'default',
-              value: { jobId: ctx.jobId, command: 'discuss', mode: 'replace' },
+              width: 'fill',
+              behaviors: [{ type: 'callback', value: { jobId: ctx.jobId, command: 'discuss', mode: 'replace' } }],
               confirm: {
                 title: { tag: 'plain_text', content: '确认深度分析' },
                 text: { tag: 'plain_text', content: '将使用 Opus 模型，耗时约 1-2 分钟。确认？' },
@@ -373,7 +481,7 @@ export class FeishuResponder implements Responder {
       })
     }
 
-    return { schema: '2.0', header, body: { elements } }
+    return { schema: '2.0', config: { update_multi: true }, header, body: { direction: 'vertical', elements } }
   }
 
   /** U2: 技术错误 → 友好提示 */

@@ -105,7 +105,22 @@ export class ClaudeClient {
       tool_choice: { type: 'auto' },
     }, { timeout: 300_000 })  // Opus+thinking 需要更长超时
 
-    // U1: 检测 tool_use 阶段，报告生成进度
+    // 流式展示 thinking 过程（打字机效果推送到飞书卡片）
+    let thinkingLineCount = 0
+    stream.on('thinking', (_delta: string, snapshot: string) => {
+      // 每积累 ~3 行新内容推送一次，避免过于频繁
+      const lines = snapshot.split('\n').length
+      if (lines - thinkingLineCount >= 3) {
+        thinkingLineCount = lines
+        // 截取最新部分展示（避免卡片内容过长）
+        const display = snapshot.length > 800
+          ? '...\n' + snapshot.slice(-800)
+          : snapshot
+        onProgress?.(`**Opus 思考中...**\n\n${display}`)
+      }
+    })
+
+    // 检测 tool_use 阶段，报告生成进度
     let generatingReported = false
     stream.on('inputJson', () => {
       if (!generatingReported) {

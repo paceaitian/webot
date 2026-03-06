@@ -155,7 +155,7 @@ export class PipelineEngine {
         let lastProgressTime = 0
         const progressCallback = (msg: string) => {
           const now = Date.now()
-          if (now - lastProgressTime < 3000) return
+          if (now - lastProgressTime < 1000) return
           lastProgressTime = now
           responder.onProgress(ctx, msg).catch(() => {})
         }
@@ -420,7 +420,7 @@ export class PipelineEngine {
         let lastProgressTime = 0
         const progressCallback = (msg: string) => {
           const now = Date.now()
-          if (now - lastProgressTime < 3000) return
+          if (now - lastProgressTime < 1000) return
           lastProgressTime = now
           responder.onProgress(ctx, msg).catch(() => {})
         }
