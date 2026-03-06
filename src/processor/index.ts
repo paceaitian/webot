@@ -16,6 +16,11 @@ export class AIProcessor implements Processor {
     this.claude = new ClaudeClient(apiKey, baseUrl)
   }
 
+  /** 获取 ClaudeClient 实例（供 DigestEngine 使用） */
+  getClaudeClient(): ClaudeClient {
+    return this.claude
+  }
+
   async process(parsed: ParsedMessage, extracted: ExtractedContent, onProgress?: (message: string) => void): Promise<ProcessedResult> {
     const { command, content } = parsed
 

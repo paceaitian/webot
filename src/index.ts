@@ -10,8 +10,49 @@ import { ObsidianWriter } from './writer/obsidian-writer.js'
 import { CliAdapter } from './adapters/cli.js'
 import { FeishuAdapter } from './adapters/feishu.js'
 import { createLogger } from './utils/logger.js'
+import cron from 'node-cron'
+import { DigestEngine } from './digest/index.js'
+import { buildDigestCard, writeDigestToObsidian } from './digest/reporter.js'
 
 const log = createLogger('main')
+
+/** 执行每日简报并推送 */
+async function runDigest(
+  digestEngine: DigestEngine,
+  feishuClient: import('@larksuiteoapi/node-sdk').Client,
+  chatId: string,
+  vaultPath: string,
+): Promise<void> {
+  const dlog = createLogger('digest-runner')
+  try {
+    dlog.info('开始执行每日简报...')
+    const digest = await digestEngine.run()
+
+    // 发送飞书卡片
+    const card = buildDigestCard(digest)
+    const cardResp = await feishuClient.cardkit.v1.card.create({
+      data: { type: 'card_json', data: JSON.stringify(card) },
+    })
+    const cardId = cardResp.data?.card_id
+    if (cardId) {
+      await feishuClient.im.v1.message.create({
+        params: { receive_id_type: 'chat_id' },
+        data: {
+          receive_id: chatId,
+          msg_type: 'interactive',
+          content: JSON.stringify({ type: 'card', data: { card_id: cardId } }),
+        },
+      })
+      dlog.info({ cardId }, '简报卡片已发送')
+    }
+
+    // 写入 Obsidian
+    const filePath = await writeDigestToObsidian(digest, vaultPath)
+    dlog.info({ filePath }, '简报已存档到 Obsidian')
+  } catch (error) {
+    dlog.error({ error: String(error) }, '每日简报执行失败')
+  }
+}
 
 async function main() {
   const config = loadConfig()
@@ -87,6 +128,24 @@ async function main() {
     // 飞书 WebSocket 模式
     activeAdapter = new FeishuAdapter(pipeline, config.feishuAppId, config.feishuAppSecret)
     await activeAdapter.start()
+
+    // 每日简报
+    if (config.digestChatId) {
+      const feishuAdapter = activeAdapter as FeishuAdapter
+      const digestEngine = new DigestEngine(processor.getClaudeClient())
+
+      // 注入 #digest 处理器
+      feishuAdapter.setDigestHandler(async () => {
+        await runDigest(digestEngine, feishuAdapter.getClient(), config.digestChatId, config.obsidianVaultPath)
+      })
+
+      // 注册定时任务
+      cron.schedule(config.digestCron, () => {
+        runDigest(digestEngine, feishuAdapter.getClient(), config.digestChatId, config.obsidianVaultPath)
+      })
+      log.info({ cron: config.digestCron, chatId: config.digestChatId }, '每日简报定时任务已注册')
+    }
+
     log.info('Webot 飞书模式已启动，按 Ctrl+C 退出')
   }
 }

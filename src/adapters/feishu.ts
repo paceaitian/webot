@@ -14,6 +14,7 @@ const log = createLogger('feishu-adapter')
 export class FeishuAdapter extends BaseAdapter {
   private client: lark.Client
   private wsClient: lark.WSClient
+  private digestHandler?: () => Promise<void>
 
   constructor(
     pipeline: PipelineEngine,
@@ -97,6 +98,13 @@ export class FeishuAdapter extends BaseAdapter {
 
     // 构造 RawMessage
     const raw = await this.buildRawMessage(messageId, msgType, contentStr)
+
+    // #digest 指令拦截 — 不走常规管道
+    if (raw.rawText.trim().toLowerCase().startsWith('#digest') && this.digestHandler) {
+      await responder.onProgress({} as import('../types/index.js').PipelineContext, '正在生成每日简报...')
+      setImmediate(() => this.digestHandler!())
+      return
+    }
 
     // 异步执行管道
     setImmediate(async () => {
@@ -244,6 +252,11 @@ export class FeishuAdapter extends BaseAdapter {
         log.error({ jobId, command, error: String(error) }, '二次处理失败')
       }
     })
+  }
+
+  /** 设置 #digest 处理器 */
+  setDigestHandler(handler: () => Promise<void>): void {
+    this.digestHandler = handler
   }
 
   /** 获取飞书客户端（供外部使用） */

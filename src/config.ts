@@ -21,6 +21,10 @@ export interface AppConfig {
   logLevel: string
   /** 是否 CLI 模式 */
   cliMode: boolean
+  /** 每日简报 cron 表达式（默认 '0 9 * * *'） */
+  digestCron: string
+  /** 每日简报推送目标群 chat_id */
+  digestChatId: string
 }
 
 /**
@@ -39,6 +43,8 @@ export function loadConfig(): AppConfig {
     dbPath: process.env.DB_PATH ?? './data/webot.db',
     logLevel: process.env.LOG_LEVEL ?? 'info',
     cliMode,
+    digestCron: process.env.DIGEST_CRON ?? '0 9 * * *',
+    digestChatId: process.env.DIGEST_CHAT_ID ?? '',
   }
 
   // 必须配置项校验

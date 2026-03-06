@@ -15,6 +15,7 @@ const log = createLogger('claude')
 /** Claude 模型 ID */
 const HAIKU = 'claude-haiku-4-5-20251001'
 const OPUS = 'claude-opus-4-6'
+const SONNET = 'claude-sonnet-4-6-20250514'
 
 /** Claude Code 请求指纹 — 用于通过 NewAPI 代理的 Opus 模型验证 */
 const CC_HEADERS: Record<string, string> = {
@@ -170,6 +171,83 @@ export class ClaudeClient {
       content,
     )
     return { ...result, model: OPUS }
+  }
+
+  /** 批量评分（Sonnet + Structured Output） */
+  async scoreBatch(
+    systemPrompt: string,
+    userMessage: string,
+    schema: Record<string, unknown> & { type: 'object' },
+  ): Promise<Record<string, unknown>> {
+    const start = Date.now()
+    const stream = this.client.messages.stream({
+      model: SONNET,
+      max_tokens: 8192,
+      ...this.proxyMetadata(),
+      system: this.buildSystem(systemPrompt),
+      messages: [{ role: 'user', content: userMessage }],
+      tools: [{
+        name: 'score_items',
+        description: '对资讯条目进行评分和摘要',
+        input_schema: schema,
+      }],
+      tool_choice: { type: 'tool', name: 'score_items' },
+    })
+    const response = await stream.finalMessage()
+    log.info({
+      model: SONNET,
+      duration: Date.now() - start,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    }, '评分 API 调用完成')
+    const toolUse = response.content.find(b => b.type === 'tool_use')
+    if (!toolUse || toolUse.type !== 'tool_use') throw new Error('Sonnet 未返回结构化评分')
+    return toolUse.input as Record<string, unknown>
+  }
+
+  /** 综合分析（Opus + Extended Thinking，返回 Markdown） */
+  async analyze(
+    systemPrompt: string,
+    userMessage: string,
+    onProgress?: (message: string) => void,
+  ): Promise<string> {
+    const start = Date.now()
+    onProgress?.('Opus 综合分析中...')
+
+    const stream = this.client.messages.stream({
+      model: OPUS,
+      max_tokens: 16000,
+      thinking: { type: 'enabled' as const, budget_tokens: 10000 },
+      ...this.proxyMetadata(),
+      system: this.buildSystem(systemPrompt),
+      messages: [{ role: 'user', content: userMessage }],
+    }, { timeout: 300_000 })
+
+    // 流式 thinking 进度
+    let thinkingLineCount = 0
+    stream.on('thinking', (_delta: string, snapshot: string) => {
+      const lines = snapshot.split('\n').length
+      if (lines - thinkingLineCount >= 3) {
+        thinkingLineCount = lines
+        const display = snapshot.length > 800
+          ? '...\n' + snapshot.slice(-800)
+          : snapshot
+        onProgress?.(`**Opus 分析中...**\n\n${display}`)
+      }
+    })
+
+    const response = await stream.finalMessage()
+    log.info({
+      model: OPUS,
+      duration: Date.now() - start,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    }, '综合分析 API 调用完成')
+
+    return response.content
+      .filter(b => b.type === 'text')
+      .map(b => (b as { text: string }).text)
+      .join('\n')
   }
 
   /** 无指令最小元数据（Haiku） */

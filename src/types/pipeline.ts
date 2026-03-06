@@ -2,7 +2,7 @@
 import type { MessageContent, MessageSource, RawMessage } from './message.js'
 
 /** 指令类型 */
-export type CommandType = 'save' | 'discuss' | 'quote' | 'help' | 'none'
+export type CommandType = 'save' | 'discuss' | 'quote' | 'help' | 'digest' | 'none'
 
 /** 解析后的指令 */
 export interface Command {

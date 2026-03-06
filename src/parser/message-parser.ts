@@ -2,10 +2,10 @@
 import type { RawMessage, MessageContent, Command, CommandType, ParsedMessage } from '../types/index.js'
 
 /** 指令正则：匹配 #save / #discuss / #quote / #help 关键词 */
-const COMMAND_KEYWORD_REGEX = /^#(save|discuss|quote|help)\b/i
+const COMMAND_KEYWORD_REGEX = /^#(save|discuss|quote|help|digest)\b/i
 
 /** 指令参数正则：匹配指令后的非 URL 文本参数 */
-const COMMAND_ARGS_REGEX = /^#(?:save|discuss|quote)\s+((?:(?!https?:\/\/).)+)/i
+const COMMAND_ARGS_REGEX = /^#(?:save|discuss|quote|digest)\s+((?:(?!https?:\/\/).)+)/i
 
 /** URL 正则：匹配 http/https 链接 */
 const URL_REGEX = /https?:\/\/[^\s<>"{}|\\^`\[\]]+/gi
