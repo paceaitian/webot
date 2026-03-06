@@ -105,7 +105,15 @@ export class FeishuAdapter extends BaseAdapter {
       const progressCb = (msg: string) => {
         responder.onProgress({} as import('../types/index.js').PipelineContext, msg).catch(() => {})
       }
-      setImmediate(() => this.digestHandler!(progressCb))
+      setImmediate(async () => {
+        try {
+          await this.digestHandler!(progressCb)
+          await responder.closeStreaming('简报已发送', '简报卡片已单独发送，请查看下方消息')
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          await responder.closeStreaming('简报生成失败', msg, 'red')
+        }
+      })
       return
     }
 

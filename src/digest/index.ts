@@ -19,10 +19,14 @@ const log = createLogger('digest-engine')
 
 /** 单个 collector 超时 ms */
 const COLLECTOR_TIMEOUT = 60_000
-/** 评分每批条目数 */
-const SCORE_BATCH_SIZE = 15
+/** 评分每批条目数（增大批次减少 API 调用） */
+const SCORE_BATCH_SIZE = 25
 /** 分析取 Top N */
 const ANALYZE_TOP_N = 30
+/** 每个 collector 最多贡献条目数（防止 hn-blogs 等源淹没其他源） */
+const MAX_ITEMS_PER_COLLECTOR = 30
+/** 去重后总条目上限 */
+const MAX_TOTAL_ITEMS = 150
 
 /** Sonnet 评分返回的单条结构 */
 interface ScoreResult {
@@ -144,18 +148,23 @@ export class DigestEngine {
   }
 
   /**
-   * URL 维度去重，保留首次出现的条目
+   * URL 维度去重 + 每组/总量上限，防止单源淹没
    */
   private dedup(collections: CollectorResult[]): DigestItem[] {
     const seen = new Set<string>()
     const result: DigestItem[] = []
     for (const col of collections) {
+      let colCount = 0
       for (const item of col.items) {
+        if (colCount >= MAX_ITEMS_PER_COLLECTOR) break
+        if (result.length >= MAX_TOTAL_ITEMS) break
         if (!seen.has(item.url)) {
           seen.add(item.url)
           result.push(item)
+          colCount++
         }
       }
+      if (result.length >= MAX_TOTAL_ITEMS) break
     }
     return result
   }
@@ -180,34 +189,9 @@ export class DigestEngine {
           scoreSchema,
         )
 
-        // 从结构化输出映射回原始 DigestItem
-        const scoredItems = result.scored_items as ScoreResult[] | undefined
-        if (!scoredItems || !Array.isArray(scoredItems)) {
-          // 容错：尝试常见的替代 key 名
-          const altKeys = ['items', 'scores', 'results', 'scored']
-          const altItems = altKeys.reduce<ScoreResult[] | undefined>(
-            (found, key) => found || (Array.isArray(result[key]) ? result[key] as ScoreResult[] : undefined),
-            undefined,
-          )
-          if (altItems) {
-            log.warn({ batchIndex, actualKey: altKeys.find(k => Array.isArray(result[k])) }, '评分结果使用替代 key')
-            for (const scored of altItems) {
-              const original = batch[scored.index - 1]
-              if (!original) continue
-              allScored.push({
-                ...original,
-                relevance: scored.relevance,
-                quality: scored.quality,
-                timeliness: scored.timeliness,
-                totalScore: scored.relevance + scored.quality + scored.timeliness,
-                aiTitle: scored.ai_title,
-                aiSummary: scored.ai_summary,
-                category: scored.category,
-              })
-            }
-            continue
-          }
-          log.error({ batchIndex, resultKeys: Object.keys(result) }, '评分结果格式异常，跳过该批次')
+        // 从结构化输出提取评分数组 — 兼容多种返回格式
+        const scoredItems = this.extractScoredArray(result, batchIndex)
+        if (!scoredItems) {
           continue
         }
 
@@ -398,6 +382,101 @@ export class DigestEngine {
 
     // 至少匹配 1 个关键词
     return bestScore >= 1 ? bestMatch : undefined
+  }
+
+  /**
+   * 从结构化输出中提取评分数组 — 深度容错
+   * 处理 API 返回 scored_items 为非数组的情况（嵌套对象、字符串等）
+   */
+  private extractScoredArray(result: Record<string, unknown>, batchIndex: number): ScoreResult[] | null {
+    // 策略 1：直接取 scored_items
+    const primary = result.scored_items
+    if (Array.isArray(primary)) return primary as ScoreResult[]
+
+    // 策略 2：scored_items 是对象，内含数组属性
+    if (primary && typeof primary === 'object' && !Array.isArray(primary)) {
+      const nested = primary as Record<string, unknown>
+      for (const val of Object.values(nested)) {
+        if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'object' && 'index' in val[0]) {
+          log.warn({ batchIndex, structure: 'nested_object' }, '评分结果为嵌套对象，已自动提取')
+          return val as ScoreResult[]
+        }
+      }
+    }
+
+    // 策略 3：scored_items 是 JSON 字符串（代理有时将数组序列化为字符串）
+    if (typeof primary === 'string') {
+      // 3a: 直接解析
+      try {
+        const parsed = JSON.parse(primary)
+        if (Array.isArray(parsed)) {
+          log.warn({ batchIndex, structure: 'json_string' }, '评分结果为 JSON 字符串，已自动解析')
+          return parsed as ScoreResult[]
+        }
+      } catch {
+        // 3b: JSON 损坏（代理流式组装导致语法错误），逐条提取
+        const items = this.extractItemsFromMalformedJson(primary)
+        if (items.length > 0) {
+          log.warn({ batchIndex, structure: 'malformed_json', extracted: items.length }, '评分 JSON 损坏，宽容提取成功')
+          return items
+        }
+      }
+    }
+
+    // 策略 4：尝试其他常见 key 名
+    const altKeys = ['items', 'scores', 'results', 'scored']
+    for (const key of altKeys) {
+      if (Array.isArray(result[key])) {
+        log.warn({ batchIndex, actualKey: key }, '评分结果使用替代 key')
+        return result[key] as ScoreResult[]
+      }
+    }
+
+    // 策略 5：搜索 result 中任何包含 index 属性的数组
+    for (const [key, val] of Object.entries(result)) {
+      if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'object' && val[0] !== null && 'index' in val[0]) {
+        log.warn({ batchIndex, actualKey: key }, '评分结果使用未知 key')
+        return val as ScoreResult[]
+      }
+    }
+
+    // 全部失败 — 输出详细 debug 信息
+    const debugInfo: Record<string, string> = {}
+    for (const [key, val] of Object.entries(result)) {
+      const type = Array.isArray(val) ? 'array' : typeof val
+      const preview = typeof val === 'string' ? val.slice(0, 100) :
+        type === 'object' && val !== null ? JSON.stringify(val).slice(0, 200) : String(val)
+      debugInfo[key] = `${type}: ${preview}`
+    }
+    log.error({ batchIndex, debugInfo }, '评分结果格式无法识别，跳过该批次')
+    return null
+  }
+
+  /**
+   * 从损坏的 JSON 字符串中逐条提取评分对象
+   * 代理流式组装有时会在中文文本中引入语法错误（未转义字符等）
+   */
+  private extractItemsFromMalformedJson(jsonStr: string): ScoreResult[] {
+    const items: ScoreResult[] = []
+    // 按 {"index": 分割，逐条尝试解析
+    const parts = jsonStr.split(/(?=\{\s*"index"\s*:)/)
+    for (const part of parts) {
+      let cleaned = part.trim()
+      if (!cleaned.startsWith('{')) continue
+      // 截取到最后一个 } 为止
+      const lastBrace = cleaned.lastIndexOf('}')
+      if (lastBrace <= 0) continue
+      cleaned = cleaned.slice(0, lastBrace + 1)
+      try {
+        const obj = JSON.parse(cleaned) as Record<string, unknown>
+        if (typeof obj.index === 'number' && typeof obj.relevance === 'number') {
+          items.push(obj as unknown as ScoreResult)
+        }
+      } catch {
+        // 单条解析失败，跳过继续
+      }
+    }
+    return items
   }
 
   /** 转义正则特殊字符 */

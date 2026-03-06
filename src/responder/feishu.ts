@@ -204,6 +204,35 @@ export class FeishuResponder implements Responder {
     }
   }
 
+  /**
+   * 关闭流式卡片 — 用于非管道场景（如 #digest 完成后关闭进度卡片）
+   * 将进度卡片更新为简单完成状态并关闭 streaming
+   */
+  async closeStreaming(title: string, message: string, template: string = 'green'): Promise<void> {
+    if (!this.cardId) return
+    try {
+      const card = this.buildSimpleCard(title, message, template)
+      await this.client.cardkit.v1.card.update({
+        data: {
+          card: { type: 'card_json' as const, data: JSON.stringify(card) },
+          sequence: this.nextSeq(),
+        },
+        path: { card_id: this.cardId },
+      })
+      await this.client.cardkit.v1.card.settings({
+        data: {
+          settings: JSON.stringify({
+            config: { streaming_mode: false, summary: { content: title } },
+          }),
+          sequence: this.nextSeq(),
+        },
+        path: { card_id: this.cardId },
+      })
+    } catch (err) {
+      log.warn({ error: String(err) }, '关闭流式卡片失败')
+    }
+  }
+
   /** 构建完成卡片（布局同步自 webot.card CardKit 搭建工具设计） */
   private buildCompleteCard(ctx: PipelineContext): Record<string, unknown> {
     const title = ctx.processed?.title ?? '处理完成'
