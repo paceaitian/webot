@@ -22,10 +22,13 @@ async function runDigest(
   feishuClient: import('@larksuiteoapi/node-sdk').Client,
   chatId: string,
   vaultPath: string,
+  onProgress?: (msg: string) => void,
 ): Promise<void> {
   const dlog = createLogger('digest-runner')
   try {
     dlog.info('开始执行每日简报...')
+    // 动态注入 onProgress 回调到 DigestEngine
+    digestEngine.setOnProgress(onProgress)
     const digest = await digestEngine.run()
 
     // 发送飞书卡片
@@ -135,8 +138,8 @@ async function main() {
       const digestEngine = new DigestEngine(processor.getClaudeClient())
 
       // 注入 #digest 处理器
-      feishuAdapter.setDigestHandler(async () => {
-        await runDigest(digestEngine, feishuAdapter.getClient(), config.digestChatId, config.obsidianVaultPath)
+      feishuAdapter.setDigestHandler(async (onProgress) => {
+        await runDigest(digestEngine, feishuAdapter.getClient(), config.digestChatId, config.obsidianVaultPath, onProgress)
       })
 
       // 注册定时任务

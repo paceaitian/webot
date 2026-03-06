@@ -14,7 +14,7 @@ const log = createLogger('feishu-adapter')
 export class FeishuAdapter extends BaseAdapter {
   private client: lark.Client
   private wsClient: lark.WSClient
-  private digestHandler?: () => Promise<void>
+  private digestHandler?: (onProgress: (msg: string) => void) => Promise<void>
 
   constructor(
     pipeline: PipelineEngine,
@@ -102,7 +102,10 @@ export class FeishuAdapter extends BaseAdapter {
     // #digest 指令拦截 — 不走常规管道
     if (raw.rawText.trim().toLowerCase().startsWith('#digest') && this.digestHandler) {
       await responder.onProgress({} as import('../types/index.js').PipelineContext, '正在生成每日简报...')
-      setImmediate(() => this.digestHandler!())
+      const progressCb = (msg: string) => {
+        responder.onProgress({} as import('../types/index.js').PipelineContext, msg).catch(() => {})
+      }
+      setImmediate(() => this.digestHandler!(progressCb))
       return
     }
 
@@ -256,8 +259,8 @@ export class FeishuAdapter extends BaseAdapter {
     })
   }
 
-  /** 设置 #digest 处理器 */
-  setDigestHandler(handler: () => Promise<void>): void {
+  /** 设置 #digest 处理器（接收 onProgress 回调用于流式进度更新） */
+  setDigestHandler(handler: (onProgress: (msg: string) => void) => Promise<void>): void {
     this.digestHandler = handler
   }
 

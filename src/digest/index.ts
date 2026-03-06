@@ -45,6 +45,11 @@ export class DigestEngine {
     private onProgress?: (message: string) => void,
   ) {}
 
+  /** 动态注入 onProgress 回调（每次 run 前调用） */
+  setOnProgress(cb?: (message: string) => void): void {
+    this.onProgress = cb
+  }
+
   /**
    * 执行完整的每日简报流程：采集 → 评分 → 分析
    * @returns 完整的每日简报数据
@@ -178,7 +183,31 @@ export class DigestEngine {
         // 从结构化输出映射回原始 DigestItem
         const scoredItems = result.scored_items as ScoreResult[] | undefined
         if (!scoredItems || !Array.isArray(scoredItems)) {
-          log.error({ batchIndex }, '评分结果格式异常，跳过该批次')
+          // 容错：尝试常见的替代 key 名
+          const altKeys = ['items', 'scores', 'results', 'scored']
+          const altItems = altKeys.reduce<ScoreResult[] | undefined>(
+            (found, key) => found || (Array.isArray(result[key]) ? result[key] as ScoreResult[] : undefined),
+            undefined,
+          )
+          if (altItems) {
+            log.warn({ batchIndex, actualKey: altKeys.find(k => Array.isArray(result[k])) }, '评分结果使用替代 key')
+            for (const scored of altItems) {
+              const original = batch[scored.index - 1]
+              if (!original) continue
+              allScored.push({
+                ...original,
+                relevance: scored.relevance,
+                quality: scored.quality,
+                timeliness: scored.timeliness,
+                totalScore: scored.relevance + scored.quality + scored.timeliness,
+                aiTitle: scored.ai_title,
+                aiSummary: scored.ai_summary,
+                category: scored.category,
+              })
+            }
+            continue
+          }
+          log.error({ batchIndex, resultKeys: Object.keys(result) }, '评分结果格式异常，跳过该批次')
           continue
         }
 
