@@ -34,7 +34,7 @@ export function buildDigestCard(digest: DailyDigest): Record<string, unknown> {
   if (analysis.quickRead) {
     elements.push({
       tag: 'markdown',
-      content: `**🔭 30 秒速读**\n\n${analysis.quickRead}`,
+      content: `**30 秒速读**\n\n${analysis.quickRead}`,
     })
   }
 
@@ -43,7 +43,7 @@ export function buildDigestCard(digest: DailyDigest): Record<string, unknown> {
   // 今日必读 Top 5
   elements.push({
     tag: 'markdown',
-    content: '**📌 今日必读**',
+    content: '**今日必读**',
   })
 
   for (const { item, reason } of analysis.top5) {
@@ -51,7 +51,7 @@ export function buildDigestCard(digest: DailyDigest): Record<string, unknown> {
     const articleMd = [
       `**${item.aiTitle}**`,
       item.aiSummary,
-      reason !== item.aiSummary ? `> 💡 ${reason}` : '',
+      reason !== item.aiSummary ? `> ${reason}` : '',
     ].filter(Boolean).join('\n')
 
     elements.push({ tag: 'markdown', content: articleMd })
@@ -103,7 +103,7 @@ export function buildDigestCard(digest: DailyDigest): Record<string, unknown> {
   if (analysis.correlations) {
     elements.push({
       tag: 'markdown',
-      content: `**🔗 跨源关联**\n\n${analysis.correlations}`,
+      content: `**跨源关联**\n\n${analysis.correlations}`,
     })
   }
 
@@ -111,7 +111,7 @@ export function buildDigestCard(digest: DailyDigest): Record<string, unknown> {
   if (analysis.actionItems) {
     elements.push({
       tag: 'markdown',
-      content: `**✅ 行动项**\n\n${analysis.actionItems}`,
+      content: `**行动项**\n\n${analysis.actionItems}`,
     })
   }
 
@@ -119,7 +119,7 @@ export function buildDigestCard(digest: DailyDigest): Record<string, unknown> {
   const minutes = Math.round(totalDuration / 60_000)
   elements.push({
     tag: 'markdown',
-    content: `<font color='grey'>${sourceCount} 源 · ${articleCount} 入选 · Sonnet+Opus · ${minutes}min</font>`,
+    content: `<font color='grey'>${sourceCount} 源 | ${articleCount} 入选 | Opus | ${minutes}min</font>`,
   })
 
   return {

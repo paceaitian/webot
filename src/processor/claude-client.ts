@@ -15,7 +15,6 @@ const log = createLogger('claude')
 /** Claude 模型 ID */
 const HAIKU = 'claude-haiku-4-5-20251001'
 const OPUS = 'claude-opus-4-6'
-const SONNET = 'claude-sonnet-4-6-20250514'
 
 /** Claude Code 请求指纹 — 用于通过 NewAPI 代理的 Opus 模型验证 */
 const CC_HEADERS: Record<string, string> = {
@@ -181,7 +180,7 @@ export class ClaudeClient {
   ): Promise<Record<string, unknown>> {
     const start = Date.now()
     const stream = this.client.messages.stream({
-      model: SONNET,
+      model: OPUS,
       max_tokens: 8192,
       ...this.proxyMetadata(),
       system: this.buildSystem(systemPrompt),
@@ -195,13 +194,13 @@ export class ClaudeClient {
     })
     const response = await stream.finalMessage()
     log.info({
-      model: SONNET,
+      model: OPUS,
       duration: Date.now() - start,
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
     }, '评分 API 调用完成')
     const toolUse = response.content.find(b => b.type === 'tool_use')
-    if (!toolUse || toolUse.type !== 'tool_use') throw new Error('Sonnet 未返回结构化评分')
+    if (!toolUse || toolUse.type !== 'tool_use') throw new Error('Opus 未返回结构化评分')
     return toolUse.input as Record<string, unknown>
   }
 

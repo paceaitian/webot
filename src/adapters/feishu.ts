@@ -130,6 +130,8 @@ export class FeishuAdapter extends BaseAdapter {
       case 'text': {
         const parsed = JSON.parse(contentStr)
         rawText = parsed.text ?? ''
+        // 群聊 @ 机器人时，文本前缀包含 @_user_N，需剥离
+        rawText = rawText.replace(/@_user_\d+\s*/g, '').trim()
         break
       }
       case 'image': {
