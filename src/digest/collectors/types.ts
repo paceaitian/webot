@@ -1,5 +1,29 @@
 // 每日简报采集类型定义
 
+/** 渠道分组标识 */
+export type ChannelGroupId = 'tech' | 'domestic-hot' | 'domestic-tech' | 'finance'
+
+/** 渠道配置 */
+export interface ChannelConfig {
+  /** 渠道 ID */
+  id: string
+  /** 显示名称 */
+  name: string
+  /** 所属分组 */
+  group: ChannelGroupId
+  /** 卡片中展示条目数 */
+  displayCount: number
+  /** 是否需要 Sonnet 评分 */
+  scored: boolean
+}
+
+/** 分组配置 */
+export interface ChannelGroupConfig {
+  id: ChannelGroupId
+  label: string
+  channels: ChannelConfig[]
+}
+
 /** 单条采集结果 */
 export interface DigestItem {
   /** 标题 */
@@ -72,5 +96,28 @@ export interface DailyDigest {
   /** Opus 综合分析 */
   analysis: DigestAnalysis
   /** 总耗时 ms */
+  totalDuration: number
+}
+
+/** 按渠道组织的简报数据（v2） */
+export interface ChannelDigest {
+  /** 渠道配置 */
+  channel: ChannelConfig
+  /** 渠道内条目（技术渠道为 ScoredItem，其他为 DigestItem） */
+  items: Array<DigestItem | ScoredItem>
+}
+
+/** v2 完整简报 */
+export interface DailyDigestV2 {
+  date: string
+  /** 按分组组织的渠道数据 */
+  groups: Array<{
+    config: ChannelGroupConfig
+    channels: ChannelDigest[]
+  }>
+  /** 技术渠道 Opus 分析（仅技术渠道参与） */
+  analysis: DigestAnalysis
+  /** 所有采集结果（用于统计） */
+  collections: CollectorResult[]
   totalDuration: number
 }
