@@ -22,7 +22,6 @@ const log = createLogger('digest-engine')
 
 const COLLECTOR_TIMEOUT = 60_000
 const SCORE_BATCH_SIZE = 25
-const ANALYZE_TOP_N = 30
 
 /** Sonnet 评分返回的单条结构 */
 interface ScoreResult {
@@ -76,16 +75,22 @@ export class DigestEngine {
     this.onProgress?.(`评分中: ${techItems.length} 条技术渠道条目...`)
     const scoredItems = await this.score(techItems)
 
-    // 将评分结果回填到渠道数据
+    // 将评分结果回填到渠道数据，并按总分排序后截断到 displayCount 用于展示
     const scoredMap = new Map(scoredItems.map(s => [s.url, s]))
     for (const cd of techChannels) {
-      cd.items = cd.items.map(item => scoredMap.get(item.url) ?? item)
+      cd.items = cd.items
+        .map(item => scoredMap.get(item.url) ?? item)
+        .sort((a, b) => {
+          const sa = 'totalScore' in a ? (a as ScoredItem).totalScore : 0
+          const sb = 'totalScore' in b ? (b as ScoredItem).totalScore : 0
+          return sb - sa
+        })
+        .slice(0, cd.channel.displayCount)
     }
 
-    // 阶段 4：Opus 分析（仅技术渠道 Top N）
-    const top = scoredItems.slice(0, ANALYZE_TOP_N)
-    this.onProgress?.(`Opus 综合分析 Top ${top.length} 条...`)
-    const analysis = await this.analyze(top)
+    // 阶段 4：Opus 分析（全部评分条目）
+    this.onProgress?.(`Opus 综合分析 ${scoredItems.length} 条...`)
+    const analysis = await this.analyze(scoredItems)
     log.info('综合分析完成')
 
     const totalDuration = Date.now() - start
@@ -143,7 +148,8 @@ export class DigestEngine {
   }
 
   /**
-   * 将采集结果按渠道分桶，每个渠道取 displayCount 条
+   * 将采集结果按渠道分桶
+   * 技术渠道（scored）保留全部条目用于评分；非技术渠道取 displayCount 条
    * 跨渠道 URL 去重：同 URL 只保留在第一个出现的渠道
    */
   private organizeByChannel(collections: CollectorResult[]): ChannelDigest[] {
@@ -174,10 +180,12 @@ export class DigestEngine {
       }
     }
 
-    // 按渠道注册表顺序组装，每渠道取 displayCount 条
+    // 按渠道注册表顺序组装
+    // 技术渠道（scored）保留全部条目用于评分，非技术渠道取 displayCount 条
     const result: ChannelDigest[] = []
     for (const ch of CHANNELS) {
-      const items = (channelItems.get(ch.id) ?? []).slice(0, ch.displayCount)
+      const allItems = channelItems.get(ch.id) ?? []
+      const items = ch.scored ? allItems : allItems.slice(0, ch.displayCount)
       if (items.length > 0) {
         result.push({ channel: ch, items })
       }
