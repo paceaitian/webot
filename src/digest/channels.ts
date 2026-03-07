@@ -5,11 +5,11 @@ import type { ChannelConfig, ChannelGroupConfig } from './collectors/types.js'
 /** 全部渠道配置 */
 export const CHANNELS: ChannelConfig[] = [
   // 技术精选 — Sonnet 评分 + AI 摘要
-  { id: 'hackernews',     name: 'Hacker News',    group: 'tech', displayCount: 5, scored: true },
-  { id: 'producthunt',    name: 'Product Hunt',   group: 'tech', displayCount: 3, scored: true },
-  { id: 'github-trending', name: 'GitHub Trending', group: 'tech', displayCount: 5, scored: true },
-  { id: 'v2ex',           name: 'V2EX',           group: 'tech', displayCount: 3, scored: true },
-  { id: 'rss',            name: 'RSS 精选',        group: 'tech', displayCount: 5, scored: true },
+  { id: 'hackernews',     name: 'Hacker News',    group: 'tech', displayCount: 10, scored: true },
+  { id: 'producthunt',    name: 'Product Hunt',   group: 'tech', displayCount: 10, scored: true },
+  { id: 'github-trending', name: 'GitHub Trending', group: 'tech', displayCount: 10, scored: true },
+  { id: 'v2ex',           name: 'V2EX',           group: 'tech', displayCount: 10, scored: true },
+  { id: 'rss',            name: 'RSS 精选',        group: 'tech', displayCount: 10, scored: true },
 
   // 国内热点 — 不评分，保留平台排名
   { id: 'weibo',          name: '微博热搜',        group: 'domestic-hot', displayCount: 5, scored: false },

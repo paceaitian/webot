@@ -40,7 +40,10 @@ export function buildDigestCard(digest: DailyDigestV2): Record<string, unknown> 
 
   // 30 秒速读
   if (analysis.quickRead) {
-    elements.push({ tag: 'markdown', content: `**30 秒速读**\n\n${analysis.quickRead}` })
+    const techGroup = groups.find(g => g.config.id === 'tech')
+    const techCount = techGroup ? techGroup.channels.reduce((s, c) => s + c.items.length, 0) : 0
+    const note = techCount > 0 ? `<font color='grey'>基于 ${techCount} 条技术精选的 AI 分析</font>\n\n` : ''
+    elements.push({ tag: 'markdown', content: `**30 秒速读**\n\n${note}${analysis.quickRead}` })
   }
 
   // 按分组渲染
@@ -89,9 +92,10 @@ function buildChannelItemsMd(cd: ChannelDigest): string {
     if (cd.channel.scored && isScoredItem(item)) {
       if (cd.channel.id === 'github-trending') {
         const stars = item.extra?.starsToday ?? ''
-        return `${i + 1}. [${item.title}](${item.url})${stars ? ` ⭐ ${stars} today` : ''}`
+        const desc = item.description ? `\n   ${item.description}` : ''
+        return `${i + 1}. [${item.title}](${item.url})${stars ? ` ⭐ ${stars} today` : ''}${desc}`
       }
-      return `${i + 1}. **${item.aiTitle}** — ${item.source}\n   ${item.aiSummary}`
+      return `${i + 1}. [**${item.aiTitle}**](${item.url}) — ${item.source}\n   ${item.aiSummary}`
     }
     // 非技术渠道：直接原标题
     return `${i + 1}. [${item.title}](${item.url})`
