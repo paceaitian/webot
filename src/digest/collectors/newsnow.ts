@@ -24,7 +24,6 @@ interface NewsNowItem {
 const PLATFORM_NAMES: Record<string, string> = {
   // 技术
   hackernews: 'Hacker News',
-  producthunt: 'Product Hunt',
   v2ex: 'V2EX',
   // 国内热点
   weibo: '微博热搜',
@@ -46,7 +45,7 @@ const PLATFORM_NAMES: Record<string, string> = {
 
 /** 采集组定义 — 按分组对齐 */
 const GROUPS: Record<string, string[]> = {
-  'tech-news': ['hackernews', 'producthunt', 'v2ex'],
+  'tech-news': ['hackernews', 'v2ex'],
   'domestic-hot': ['weibo', 'zhihu', 'douyin', 'hupu', 'tieba', 'toutiao'],
   'domestic-tech': ['36kr', 'ithome', 'coolapk', 'thepaper'],
   'finance': ['wallstreetcn', 'cls-telegraph', 'mktnews'],

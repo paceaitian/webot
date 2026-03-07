@@ -29,6 +29,7 @@ export const FEEDS: FeedSource[] = [
 
   // === startup 组 ===
   { name: 'TechCrunch', url: 'https://techcrunch.com/feed/', group: 'startup' },
+  { name: 'Product Hunt', url: 'https://www.producthunt.com/feed', group: 'startup' },
 
   // === hn-blogs 组（HN 2025 年度热门博客，92 个） ===
   { name: 'simonwillison.net', url: 'https://simonwillison.net/atom/everything/', group: 'hn-blogs' },

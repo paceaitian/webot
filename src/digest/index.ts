@@ -21,7 +21,8 @@ import type {
 const log = createLogger('digest-engine')
 
 const COLLECTOR_TIMEOUT = 60_000
-const SCORE_BATCH_SIZE = 25
+const SCORE_BATCH_SIZE = 50
+const SCORE_BATCH_COOLDOWN = 8_000 // 批间冷却 8s，防止代理连接池耗尽
 
 /** Sonnet 评分返回的单条结构 */
 interface ScoreResult {
@@ -72,6 +73,8 @@ export class DigestEngine {
     // 阶段 3：技术渠道 Sonnet 评分
     const techChannels = channelDigests.filter(cd => cd.channel.scored)
     const techItems = techChannels.flatMap(cd => cd.items)
+    // 打散不同渠道的条目，防止单批失败导致整个渠道丢失评分
+    this.shuffle(techItems)
     this.onProgress?.(`评分中: ${techItems.length} 条技术渠道条目...`)
     const scoredItems = await this.score(techItems)
 
@@ -165,8 +168,9 @@ export class DigestEngine {
     // 遍历所有采集结果，按 source 名称分桶
     for (const col of collections) {
       for (const item of col.items) {
-        if (seenUrls.has(item.url)) continue
-        seenUrls.add(item.url)
+        // 空 URL 不参与去重（60s 读世界等无链接条目）
+        if (item.url && seenUrls.has(item.url)) continue
+        if (item.url) seenUrls.add(item.url)
 
         // 匹配渠道：先精确匹配 source，再从 collector name 推断
         let channelId = sourceToChannel.get(item.source)
@@ -254,6 +258,11 @@ export class DigestEngine {
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         log.error({ batchIndex, err: msg }, '评分批次失败，跳过')
+      }
+
+      // 批间冷却：防止代理连接池耗尽导致后续批次连续失败
+      if (i + SCORE_BATCH_SIZE < items.length) {
+        await new Promise(r => setTimeout(r, SCORE_BATCH_COOLDOWN))
       }
     }
 
@@ -519,6 +528,14 @@ export class DigestEngine {
   /** 转义正则特殊字符 */
   private escapeRegex(s: string): string {
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  }
+
+  /** Fisher-Yates 原地打散数组 */
+  private shuffle<T>(arr: T[]): void {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[arr[i], arr[j]] = [arr[j], arr[i]]
+    }
   }
 
   /**
