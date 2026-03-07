@@ -1,4 +1,4 @@
-// 每日简报主调度引擎 — 协调采集器、Sonnet 评分、Opus 分析，输出完整 DailyDigest
+// 每日简报 v2 主调度引擎 — 按渠道分组 + 分层评分
 
 import { createLogger } from '../utils/logger.js'
 import { ClaudeClient } from '../processor/claude-client.js'
@@ -7,26 +7,21 @@ import { collectNewsNow } from './collectors/newsnow.js'
 import { collectRssGroup } from './collectors/rss.js'
 import { scoreSystemPrompt, scoreUserPrompt, scoreSchema } from './prompts/score.js'
 import { analyzeSystemPrompt, analyzeUserPrompt } from './prompts/analyze.js'
+import { CHANNEL_GROUPS, CHANNELS } from './channels.js'
 import type {
   DigestItem,
   CollectorResult,
   ScoredItem,
   DigestAnalysis,
-  DailyDigest,
+  DailyDigestV2,
+  ChannelDigest,
 } from './collectors/types.js'
 
 const log = createLogger('digest-engine')
 
-/** 单个 collector 超时 ms */
 const COLLECTOR_TIMEOUT = 60_000
-/** 评分每批条目数（增大批次减少 API 调用） */
 const SCORE_BATCH_SIZE = 25
-/** 分析取 Top N */
 const ANALYZE_TOP_N = 30
-/** 每个 collector 最多贡献条目数（防止 hn-blogs 等源淹没其他源） */
-const MAX_ITEMS_PER_COLLECTOR = 30
-/** 去重后总条目上限 */
-const MAX_TOTAL_ITEMS = 150
 
 /** Sonnet 评分返回的单条结构 */
 interface ScoreResult {
@@ -58,43 +53,50 @@ export class DigestEngine {
    * 执行完整的每日简报流程：采集 → 评分 → 分析
    * @returns 完整的每日简报数据
    */
-  async run(): Promise<DailyDigest> {
+  async run(): Promise<DailyDigestV2> {
     const start = Date.now()
     const date = new Date().toISOString().slice(0, 10)
 
     // 阶段 1：采集
-    this.onProgress?.('📡 正在采集 8 路数据源...')
     const collections = await this.collect()
     const totalItems = collections.reduce((sum, c) => sum + c.items.length, 0)
     const successCount = collections.filter(c => !c.error).length
     log.info({ totalItems, successCount, totalCollectors: collections.length }, '采集完成')
     this.onProgress?.(`采集完成: ${totalItems} 条来自 ${successCount}/${collections.length} 个源`)
 
-    // 阶段 2：去重
-    const uniqueItems = this.dedup(collections)
-    log.info({ before: totalItems, after: uniqueItems.length }, 'URL 去重完成')
+    // 阶段 2：按渠道分桶 + 去重
+    const channelDigests = this.organizeByChannel(collections)
+    const totalChannels = channelDigests.length
+    log.info({ totalChannels }, '渠道分桶完成')
 
-    // 阶段 3：Sonnet 评分
-    this.onProgress?.(`🔍 Sonnet 评分中 (${uniqueItems.length} 条)...`)
-    const scoredItems = await this.score(uniqueItems)
-    log.info({ scored: scoredItems.length }, '评分完成')
+    // 阶段 3：技术渠道 Sonnet 评分
+    const techChannels = channelDigests.filter(cd => cd.channel.scored)
+    const techItems = techChannels.flatMap(cd => cd.items)
+    this.onProgress?.(`评分中: ${techItems.length} 条技术渠道条目...`)
+    const scoredItems = await this.score(techItems)
 
-    // 阶段 4：Opus 分析 Top N
+    // 将评分结果回填到渠道数据
+    const scoredMap = new Map(scoredItems.map(s => [s.url, s]))
+    for (const cd of techChannels) {
+      cd.items = cd.items.map(item => scoredMap.get(item.url) ?? item)
+    }
+
+    // 阶段 4：Opus 分析（仅技术渠道 Top N）
     const top = scoredItems.slice(0, ANALYZE_TOP_N)
-    this.onProgress?.(`🧠 Opus 综合分析 Top ${top.length} 条...`)
+    this.onProgress?.(`Opus 综合分析 Top ${top.length} 条...`)
     const analysis = await this.analyze(top)
     log.info('综合分析完成')
 
     const totalDuration = Date.now() - start
-    this.onProgress?.(`✅ 简报完成，耗时 ${Math.round(totalDuration / 1000)}s`)
+    this.onProgress?.(`简报完成，耗时 ${Math.round(totalDuration / 1000)}s`)
 
-    return {
-      date,
-      collections,
-      scoredItems,
-      analysis,
-      totalDuration,
-    }
+    // 组装分组结构
+    const groups = CHANNEL_GROUPS.map(groupConfig => ({
+      config: groupConfig,
+      channels: channelDigests.filter(cd => cd.channel.group === groupConfig.id),
+    }))
+
+    return { date, groups, analysis, collections, totalDuration }
   }
 
   /**
@@ -105,15 +107,17 @@ export class DigestEngine {
     const collectors: Array<{ name: string; fn: () => Promise<CollectorResult> }> = [
       { name: 'github-trending', fn: () => collectGhTrending() },
       { name: 'newsnow-tech-news', fn: () => collectNewsNow('tech-news') },
-      { name: 'newsnow-trends', fn: () => collectNewsNow('trends') },
-      { name: 'newsnow-xhs', fn: () => collectNewsNow('xhs') },
+      { name: 'newsnow-domestic-hot', fn: () => collectNewsNow('domestic-hot') },
+      { name: 'newsnow-domestic-tech', fn: () => collectNewsNow('domestic-tech') },
+      { name: 'newsnow-finance', fn: () => collectNewsNow('finance') },
       { name: 'rss-ai', fn: () => collectRssGroup('ai') },
       { name: 'rss-dev', fn: () => collectRssGroup('dev') },
       { name: 'rss-startup', fn: () => collectRssGroup('startup') },
       { name: 'rss-hn-blogs', fn: () => collectRssGroup('hn-blogs') },
     ]
 
-    // 带超时的并行执行
+    this.onProgress?.(`正在采集 ${collectors.length} 路数据源...`)
+
     const results = await Promise.allSettled(
       collectors.map(({ name, fn }) =>
         Promise.race([
@@ -124,49 +128,72 @@ export class DigestEngine {
         ]).catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err)
           log.error({ collector: name, err: msg }, 'collector 失败')
-          return {
-            name,
-            items: [],
-            duration: COLLECTOR_TIMEOUT,
-            error: msg,
-          } satisfies CollectorResult
+          return { name, items: [], duration: COLLECTOR_TIMEOUT, error: msg } satisfies CollectorResult
         }),
       ),
     )
 
     return results.map((r, i) => {
       if (r.status === 'fulfilled') return r.value
-      // Promise.allSettled + catch 保证不会走到这里，但类型安全需要
       const msg = r.reason instanceof Error ? r.reason.message : String(r.reason)
-      return {
-        name: collectors[i].name,
-        items: [],
-        duration: COLLECTOR_TIMEOUT,
-        error: msg,
-      }
+      return { name: collectors[i].name, items: [], duration: COLLECTOR_TIMEOUT, error: msg }
     })
   }
 
   /**
-   * URL 维度去重 + 每组/总量上限，防止单源淹没
+   * 将采集结果按渠道分桶，每个渠道取 displayCount 条
+   * 跨渠道 URL 去重：同 URL 只保留在第一个出现的渠道
    */
-  private dedup(collections: CollectorResult[]): DigestItem[] {
-    const seen = new Set<string>()
-    const result: DigestItem[] = []
+  private organizeByChannel(collections: CollectorResult[]): ChannelDigest[] {
+    const seenUrls = new Set<string>()
+    const channelItems = new Map<string, DigestItem[]>()
+
+    // 建立 source → channelId 映射
+    const sourceToChannel = new Map<string, string>()
+    for (const ch of CHANNELS) {
+      sourceToChannel.set(ch.name, ch.id)
+    }
+
+    // 遍历所有采集结果，按 source 名称分桶
     for (const col of collections) {
-      let colCount = 0
       for (const item of col.items) {
-        if (colCount >= MAX_ITEMS_PER_COLLECTOR) break
-        if (result.length >= MAX_TOTAL_ITEMS) break
-        if (!seen.has(item.url)) {
-          seen.add(item.url)
-          result.push(item)
-          colCount++
+        if (seenUrls.has(item.url)) continue
+        seenUrls.add(item.url)
+
+        // 匹配渠道：先精确匹配 source，再从 collector name 推断
+        let channelId = sourceToChannel.get(item.source)
+        if (!channelId) {
+          channelId = this.inferChannelId(item.source, col.name)
         }
+        if (!channelId) continue
+
+        if (!channelItems.has(channelId)) channelItems.set(channelId, [])
+        channelItems.get(channelId)!.push(item)
       }
-      if (result.length >= MAX_TOTAL_ITEMS) break
+    }
+
+    // 按渠道注册表顺序组装，每渠道取 displayCount 条
+    const result: ChannelDigest[] = []
+    for (const ch of CHANNELS) {
+      const items = (channelItems.get(ch.id) ?? []).slice(0, ch.displayCount)
+      if (items.length > 0) {
+        result.push({ channel: ch, items })
+      }
     }
     return result
+  }
+
+  /**
+   * 从 item.source 和 collector name 推断渠道 ID
+   */
+  private inferChannelId(source: string, collectorName: string): string | undefined {
+    // GitHub Trending
+    if (source === 'github-trending' || collectorName === 'github-trending') return 'github-trending'
+    // RSS 各组归入统一 rss 渠道
+    if (collectorName.startsWith('rss-')) return 'rss'
+    // NewsNow 各平台：source 是中文显示名，从 CHANNELS 匹配
+    const ch = CHANNELS.find(c => c.name === source)
+    return ch?.id
   }
 
   /**
