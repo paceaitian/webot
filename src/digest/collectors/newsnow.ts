@@ -22,20 +22,35 @@ interface NewsNowItem {
 
 /** 源 ID 到显示名称的映射 */
 const PLATFORM_NAMES: Record<string, string> = {
+  // 技术
   hackernews: 'Hacker News',
   producthunt: 'Product Hunt',
   v2ex: 'V2EX',
+  // 国内热点
   weibo: '微博热搜',
   zhihu: '知乎热榜',
   douyin: '抖音热榜',
   xiaohongshu: '小红书',
+  hupu: '虎扑',
+  tieba: '百度贴吧',
+  toutiao: '今日头条',
+  // 国内科技
+  '36kr': '36氪',
+  ithome: 'IT之家',
+  coolapk: '酷安',
+  thepaper: '澎湃新闻',
+  // 财经
+  wallstreetcn: '华尔街见闻',
+  'cls-telegraph': '财联社',
+  mktnews: 'MKTNews',
 }
 
-/** 三个采集组定义 */
+/** 采集组定义 — 按分组对齐 */
 const GROUPS: Record<string, string[]> = {
   'tech-news': ['hackernews', 'producthunt', 'v2ex'],
-  'trends': ['weibo', 'zhihu', 'douyin'],
-  'xhs': ['xiaohongshu'],
+  'domestic-hot': ['weibo', 'zhihu', 'douyin', 'xiaohongshu', 'hupu', 'tieba', 'toutiao'],
+  'domestic-tech': ['36kr', 'ithome', 'coolapk', 'thepaper'],
+  'finance': ['wallstreetcn', 'cls-telegraph', 'mktnews'],
 }
 
 /**
