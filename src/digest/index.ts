@@ -5,6 +5,7 @@ import { ClaudeClient } from '../processor/claude-client.js'
 import { collectGhTrending } from './collectors/gh-trending.js'
 import { collectNewsNow } from './collectors/newsnow.js'
 import { collectRssGroup } from './collectors/rss.js'
+import { collect60sApi } from './collectors/60s-api.js'
 import { scoreSystemPrompt, scoreUserPrompt, scoreSchema } from './prompts/score.js'
 import { analyzeSystemPrompt, analyzeUserPrompt } from './prompts/analyze.js'
 import { CHANNEL_GROUPS, CHANNELS } from './channels.js'
@@ -110,6 +111,7 @@ export class DigestEngine {
       { name: 'newsnow-domestic-hot', fn: () => collectNewsNow('domestic-hot') },
       { name: 'newsnow-domestic-tech', fn: () => collectNewsNow('domestic-tech') },
       { name: 'newsnow-finance', fn: () => collectNewsNow('finance') },
+      { name: '60s-api', fn: () => collect60sApi() },
       { name: 'rss-ai', fn: () => collectRssGroup('ai') },
       { name: 'rss-dev', fn: () => collectRssGroup('dev') },
       { name: 'rss-startup', fn: () => collectRssGroup('startup') },
@@ -192,7 +194,7 @@ export class DigestEngine {
     // RSS 各组归入统一 rss 渠道
     if (collectorName.startsWith('rss-')) return 'rss'
     // NewsNow 各平台：source 是中文显示名，从 CHANNELS 匹配
-    const ch = CHANNELS.find(c => c.name === source)
+    const ch = CHANNELS.find(c => c.name === source || c.id === source)
     return ch?.id
   }
 
@@ -306,9 +308,9 @@ export class DigestEngine {
    * @param endKey - 结束标题关键词
    */
   private extractSection(md: string, startKey: string, endKey: string): string {
-    // 匹配包含关键词的标题行（支持 ###、##、**加粗** 等格式）
-    const startPattern = new RegExp(`(?:^|\\n)[#*\\s]*${this.escapeRegex(startKey)}[^\\n]*\\n`, 'i')
-    const endPattern = new RegExp(`(?:^|\\n)[#*\\s]*${this.escapeRegex(endKey)}`, 'i')
+    // 匹配包含关键词的标题行（支持 ###、##、**加粗**、emoji 前缀等格式）
+    const startPattern = new RegExp(`(?:^|\\n)[^\\n]*?${this.escapeRegex(startKey)}[^\\n]*\\n`, 'i')
+    const endPattern = new RegExp(`(?:^|\\n)[^\\n]*?${this.escapeRegex(endKey)}`, 'i')
 
     const startMatch = md.match(startPattern)
     if (!startMatch || startMatch.index === undefined) return ''
@@ -325,7 +327,7 @@ export class DigestEngine {
    * 提取最后一个标题关键词之后的全部内容
    */
   private extractLastSection(md: string, key: string): string {
-    const pattern = new RegExp(`(?:^|\\n)[#*\\s]*${this.escapeRegex(key)}[^\\n]*\\n`, 'i')
+    const pattern = new RegExp(`(?:^|\\n)[^\\n]*?${this.escapeRegex(key)}[^\\n]*\\n`, 'i')
     const match = md.match(pattern)
     if (!match || match.index === undefined) return ''
     return md.slice(match.index + match[0].length).trim()

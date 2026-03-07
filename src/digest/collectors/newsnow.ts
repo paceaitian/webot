@@ -30,7 +30,6 @@ const PLATFORM_NAMES: Record<string, string> = {
   weibo: '微博热搜',
   zhihu: '知乎热榜',
   douyin: '抖音热榜',
-  xiaohongshu: '小红书',
   hupu: '虎扑',
   tieba: '百度贴吧',
   toutiao: '今日头条',
@@ -48,7 +47,7 @@ const PLATFORM_NAMES: Record<string, string> = {
 /** 采集组定义 — 按分组对齐 */
 const GROUPS: Record<string, string[]> = {
   'tech-news': ['hackernews', 'producthunt', 'v2ex'],
-  'domestic-hot': ['weibo', 'zhihu', 'douyin', 'xiaohongshu', 'hupu', 'tieba', 'toutiao'],
+  'domestic-hot': ['weibo', 'zhihu', 'douyin', 'hupu', 'tieba', 'toutiao'],
   'domestic-tech': ['36kr', 'ithome', 'coolapk', 'thepaper'],
   'finance': ['wallstreetcn', 'cls-telegraph', 'mktnews'],
 }

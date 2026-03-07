@@ -29,7 +29,6 @@ export const FEEDS: FeedSource[] = [
 
   // === startup 组 ===
   { name: 'TechCrunch', url: 'https://techcrunch.com/feed/', group: 'startup' },
-  { name: '极客公园', url: 'https://www.geekpark.net/rss', group: 'startup' },
 
   // === hn-blogs 组（HN 2025 年度热门博客，92 个） ===
   { name: 'simonwillison.net', url: 'https://simonwillison.net/atom/everything/', group: 'hn-blogs' },
@@ -53,7 +52,6 @@ export const FEEDS: FeedSource[] = [
   { name: 'lucumr.pocoo.org', url: 'https://lucumr.pocoo.org/feed.atom', group: 'hn-blogs' },
   { name: 'skyfall.dev', url: 'https://skyfall.dev/rss.xml', group: 'hn-blogs' },
   { name: 'garymarcus.substack.com', url: 'https://garymarcus.substack.com/feed', group: 'hn-blogs' },
-  { name: 'rachelbythebay.com', url: 'https://rachelbythebay.com/w/atom.xml', group: 'hn-blogs' },
   { name: 'overreacted.io', url: 'https://overreacted.io/rss.xml', group: 'hn-blogs' },
   { name: 'timsh.org', url: 'https://timsh.org/rss/', group: 'hn-blogs' },
   { name: 'johndcook.com', url: 'https://www.johndcook.com/blog/feed/', group: 'hn-blogs' },
@@ -123,5 +121,4 @@ export const FEEDS: FeedSource[] = [
   { name: 'keygen.sh', url: 'https://keygen.sh/blog/feed.xml', group: 'hn-blogs' },
   { name: 'mjg59.dreamwidth.org', url: 'https://mjg59.dreamwidth.org/data/rss', group: 'hn-blogs' },
   { name: 'computer.rip', url: 'https://computer.rip/rss.xml', group: 'hn-blogs' },
-  { name: 'tedunangst.com', url: 'https://flak.tedunangst.com/rss', group: 'hn-blogs' },
 ]

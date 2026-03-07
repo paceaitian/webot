@@ -19,6 +19,7 @@ export const CHANNELS: ChannelConfig[] = [
   { id: 'hupu',           name: '虎扑',            group: 'domestic-hot', displayCount: 3, scored: false },
   { id: 'tieba',          name: '百度贴吧',        group: 'domestic-hot', displayCount: 3, scored: false },
   { id: 'toutiao',        name: '今日头条',        group: 'domestic-hot', displayCount: 3, scored: false },
+  { id: '60s-news',       name: '60秒读世界',      group: 'domestic-hot', displayCount: 3, scored: false },
 
   // 国内科技 — 不评分
   { id: '36kr',           name: '36氪',            group: 'domestic-tech', displayCount: 3, scored: false },
