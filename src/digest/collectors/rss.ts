@@ -8,8 +8,8 @@ const log = createLogger('rss')
 
 /** 请求超时 ms */
 const FETCH_TIMEOUT = 15_000
-/** User-Agent 标识 */
-const USER_AGENT = 'webot/0.1'
+/** User-Agent 标识 — 使用浏览器 UA 避免被拒 */
+const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 /** 24 小时毫秒数 */
 const MS_24H = 24 * 60 * 60 * 1000
 /** hn-blogs 组并发上限 */
@@ -193,23 +193,40 @@ async function concurrentFetch(
   return results
 }
 
-/** 请求单个 feed 并解析 */
+/** 429 重试最大次数 */
+const MAX_429_RETRIES = 2
+
+/** 请求单个 feed 并解析，429 限流时自动重试 */
 async function fetchFeed(source: FeedSource): Promise<DigestItem[]> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT)
-  try {
-    const resp = await fetch(source.url, {
-      signal: controller.signal,
-      headers: { 'User-Agent': USER_AGENT },
-    })
-    if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status}`)
+  for (let attempt = 0; attempt <= MAX_429_RETRIES; attempt++) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT)
+    try {
+      const resp = await fetch(source.url, {
+        signal: controller.signal,
+        headers: { 'User-Agent': USER_AGENT },
+      })
+
+      // 429 限流：读取 Retry-After 头，延迟重试
+      if (resp.status === 429 && attempt < MAX_429_RETRIES) {
+        const retryAfter = resp.headers.get('Retry-After')
+        const delay = retryAfter ? parseInt(retryAfter, 10) * 1000 : 3000
+        log.warn({ source: source.name, delay, attempt: attempt + 1 }, 'RSS 429 限流，延迟重试')
+        clearTimeout(timer)
+        await new Promise(r => setTimeout(r, Math.min(delay, 10_000)))
+        continue
+      }
+
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}`)
+      }
+      const xml = await resp.text()
+      return parseRssXml(xml, source.name)
+    } finally {
+      clearTimeout(timer)
     }
-    const xml = await resp.text()
-    return parseRssXml(xml, source.name)
-  } finally {
-    clearTimeout(timer)
   }
+  throw new Error('HTTP 429')
 }
 
 /** 去除 HTML 标签 */

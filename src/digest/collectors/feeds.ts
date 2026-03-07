@@ -19,8 +19,9 @@ export interface FeedSource {
  */
 export const FEEDS: FeedSource[] = [
   // === ai 组 ===
-  { name: "Ben's Bites", url: 'https://bensbites.beehiiv.com/feed', group: 'ai' },
+  { name: 'Import AI', url: 'https://jack-clark.net/feed', group: 'ai' },
   { name: 'MIT 科技评论中文', url: 'https://www.mittrchina.com/rss', group: 'ai' },
+  { name: 'Machine Learning Mastery', url: 'https://machinelearningmastery.com/feed/', group: 'ai' },
 
   // === dev 组 ===
   { name: '阮一峰', url: 'https://www.ruanyifeng.com/blog/atom.xml', group: 'dev' },
@@ -122,5 +123,5 @@ export const FEEDS: FeedSource[] = [
   { name: 'keygen.sh', url: 'https://keygen.sh/blog/feed.xml', group: 'hn-blogs' },
   { name: 'mjg59.dreamwidth.org', url: 'https://mjg59.dreamwidth.org/data/rss', group: 'hn-blogs' },
   { name: 'computer.rip', url: 'https://computer.rip/rss.xml', group: 'hn-blogs' },
-  { name: 'tedunangst.com', url: 'https://www.tedunangst.com/flak/rss', group: 'hn-blogs' },
+  { name: 'tedunangst.com', url: 'https://flak.tedunangst.com/rss', group: 'hn-blogs' },
 ]

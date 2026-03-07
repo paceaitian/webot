@@ -97,39 +97,56 @@ export async function collectNewsNow(
   }
 }
 
-/** 请求单个平台，取前 10 条 */
+/** 5xx 重试最大次数 */
+const MAX_5XX_RETRIES = 2
+/** 重试延迟 ms */
+const RETRY_DELAYS = [500, 2000]
+
+/** 请求单个平台，取前 10 条，5xx 自动重试 */
 async function fetchPlatform(platformId: string, limit = 10): Promise<DigestItem[]> {
-  const url = `${API_BASE}?id=${platformId}&latest`
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT)
+  for (let attempt = 0; attempt <= MAX_5XX_RETRIES; attempt++) {
+    const url = `${API_BASE}?id=${platformId}&latest`
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT)
 
-  try {
-    const resp = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': USER_AGENT,
-        'Accept': 'application/json',
-      },
-    })
+    try {
+      const resp = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': USER_AGENT,
+          'Accept': 'application/json',
+        },
+      })
 
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      // 5xx 服务端错误：延迟重试
+      if (resp.status >= 500 && attempt < MAX_5XX_RETRIES) {
+        const delay = RETRY_DELAYS[attempt]
+        log.warn({ platformId, status: resp.status, delay, attempt: attempt + 1 }, 'NewsNow 5xx 错误，重试')
+        clearTimeout(timer)
+        await new Promise(r => setTimeout(r, delay))
+        continue
+      }
 
-    const contentType = resp.headers.get('content-type') ?? ''
-    if (!contentType.includes('json')) {
-      log.warn({ platformId, contentType }, 'NewsNow 返回非 JSON，跳过')
-      return []
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+
+      const contentType = resp.headers.get('content-type') ?? ''
+      if (!contentType.includes('json')) {
+        log.warn({ platformId, contentType }, 'NewsNow 返回非 JSON，跳过')
+        return []
+      }
+
+      const data = (await resp.json()) as { items?: NewsNowItem[] }
+      const items = (data.items ?? []).slice(0, limit)
+      const sourceName = PLATFORM_NAMES[platformId] ?? platformId
+
+      return items.map(item => ({
+        title: item.title || '无标题',
+        url: item.url || item.mobileUrl || '',
+        source: sourceName,
+      }))
+    } finally {
+      clearTimeout(timer)
     }
-
-    const data = (await resp.json()) as { items?: NewsNowItem[] }
-    const items = (data.items ?? []).slice(0, limit)
-    const sourceName = PLATFORM_NAMES[platformId] ?? platformId
-
-    return items.map(item => ({
-      title: item.title || '无标题',
-      url: item.url || item.mobileUrl || '',
-      source: sourceName,
-    }))
-  } finally {
-    clearTimeout(timer)
   }
+  throw new Error('HTTP 5xx')
 }

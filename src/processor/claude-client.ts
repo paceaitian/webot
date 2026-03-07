@@ -9,8 +9,15 @@ import { quoteSystemPrompt, quoteUserPrompt } from './prompts/quote.js'
 import { minimalSystemPrompt, minimalUserPrompt } from './prompts/minimal.js'
 import { visionSystemPrompt, visionUserPrompt } from './prompts/vision.js'
 import { createLogger } from '../utils/logger.js'
+import { withRetry } from '../utils/retry.js'
 
 const log = createLogger('claude')
+
+/** 判断错误是否为代理层可重试错误（连接断开、超时等） */
+function isProxyRetryable(error: unknown): boolean {
+  const msg = String(error)
+  return /chunks|520|ECONNRESET|ETIMEDOUT|socket hang up|fetch failed|network/i.test(msg)
+}
 
 /** Claude 模型 ID */
 const HAIKU = 'claude-haiku-4-5-20251001'
@@ -85,51 +92,53 @@ export class ClaudeClient {
     // U1: 通知开始深度思考
     onProgress?.('Opus 深度思考中...')
 
-    const stream = this.client.messages.stream({
-      model: OPUS,
-      max_tokens: 16000,
-      // CC Switch 整流器自动处理 thinking 错误，始终启用
-      thinking: { type: 'enabled' as const, budget_tokens: 8192 },
-      ...this.proxyMetadata(),
-      system: this.buildSystem(discussSystemPrompt),
-      messages: [{
-        role: 'user',
-        content: this.buildUserContent(discussUserPrompt(content, args), content),
-      }],
-      tools: [{
-        name: 'generate_note',
-        description: '生成结构化笔记数据',
-        input_schema: noteSchema,
-      }],
-      // auto 兼容 thinking（tool 强制模式不兼容）
-      tool_choice: { type: 'auto' },
-    }, { timeout: 300_000 })  // Opus+thinking 需要更长超时
+    const response = await withRetry(async () => {
+      const stream = this.client.messages.stream({
+        model: OPUS,
+        max_tokens: 16000,
+        // CC Switch 整流器自动处理 thinking 错误，始终启用
+        thinking: { type: 'enabled' as const, budget_tokens: 8192 },
+        ...this.proxyMetadata(),
+        system: this.buildSystem(discussSystemPrompt),
+        messages: [{
+          role: 'user',
+          content: this.buildUserContent(discussUserPrompt(content, args), content),
+        }],
+        tools: [{
+          name: 'generate_note',
+          description: '生成结构化笔记数据',
+          input_schema: noteSchema,
+        }],
+        // auto 兼容 thinking（tool 强制模式不兼容）
+        tool_choice: { type: 'auto' },
+      }, { timeout: 300_000 })  // Opus+thinking 需要更长超时
 
-    // 流式展示 thinking 过程（打字机效果推送到飞书卡片）
-    let thinkingLineCount = 0
-    stream.on('thinking', (_delta: string, snapshot: string) => {
-      // 每积累 ~3 行新内容推送一次，避免过于频繁
-      const lines = snapshot.split('\n').length
-      if (lines - thinkingLineCount >= 3) {
-        thinkingLineCount = lines
-        // 截取最新部分展示（避免卡片内容过长）
-        const display = snapshot.length > 800
-          ? '...\n' + snapshot.slice(-800)
-          : snapshot
-        onProgress?.(`**Opus 思考中...**\n\n${display}`)
-      }
-    })
+      // 流式展示 thinking 过程（打字机效果推送到飞书卡片）
+      let thinkingLineCount = 0
+      stream.on('thinking', (_delta: string, snapshot: string) => {
+        // 每积累 ~3 行新内容推送一次，避免过于频繁
+        const lines = snapshot.split('\n').length
+        if (lines - thinkingLineCount >= 3) {
+          thinkingLineCount = lines
+          // 截取最新部分展示（避免卡片内容过长）
+          const display = snapshot.length > 800
+            ? '...\n' + snapshot.slice(-800)
+            : snapshot
+          onProgress?.(`**Opus 思考中...**\n\n${display}`)
+        }
+      })
 
-    // 检测 tool_use 阶段，报告生成进度
-    let generatingReported = false
-    stream.on('inputJson', () => {
-      if (!generatingReported) {
-        generatingReported = true
-        onProgress?.('AI 生成笔记...')
-      }
-    })
+      // 检测 tool_use 阶段，报告生成进度
+      let generatingReported = false
+      stream.on('inputJson', () => {
+        if (!generatingReported) {
+          generatingReported = true
+          onProgress?.('AI 生成笔记...')
+        }
+      })
 
-    const response = await stream.finalMessage()
+      return await stream.finalMessage()
+    }, { maxRetries: 3, baseDelay: 2000, retryable: isProxyRetryable })
 
     log.info({
       model: OPUS,
@@ -179,20 +188,22 @@ export class ClaudeClient {
     schema: Record<string, unknown> & { type: 'object' },
   ): Promise<Record<string, unknown>> {
     const start = Date.now()
-    const stream = this.client.messages.stream({
-      model: OPUS,
-      max_tokens: 8192,
-      ...this.proxyMetadata(),
-      system: this.buildSystem(systemPrompt),
-      messages: [{ role: 'user', content: userMessage }],
-      tools: [{
-        name: 'score_items',
-        description: '对资讯条目进行评分和摘要',
-        input_schema: schema,
-      }],
-      tool_choice: { type: 'tool', name: 'score_items' },
-    })
-    const response = await stream.finalMessage()
+    const response = await withRetry(async () => {
+      const stream = this.client.messages.stream({
+        model: OPUS,
+        max_tokens: 8192,
+        ...this.proxyMetadata(),
+        system: this.buildSystem(systemPrompt),
+        messages: [{ role: 'user', content: userMessage }],
+        tools: [{
+          name: 'score_items',
+          description: '对资讯条目进行评分和摘要',
+          input_schema: schema,
+        }],
+        tool_choice: { type: 'tool', name: 'score_items' },
+      })
+      return await stream.finalMessage()
+    }, { maxRetries: 3, baseDelay: 2000, retryable: isProxyRetryable })
     log.info({
       model: OPUS,
       duration: Date.now() - start,
@@ -213,29 +224,31 @@ export class ClaudeClient {
     const start = Date.now()
     onProgress?.('Opus 综合分析中...')
 
-    const stream = this.client.messages.stream({
-      model: OPUS,
-      max_tokens: 16000,
-      thinking: { type: 'enabled' as const, budget_tokens: 10000 },
-      ...this.proxyMetadata(),
-      system: this.buildSystem(systemPrompt),
-      messages: [{ role: 'user', content: userMessage }],
-    }, { timeout: 300_000 })
+    const response = await withRetry(async () => {
+      const stream = this.client.messages.stream({
+        model: OPUS,
+        max_tokens: 16000,
+        thinking: { type: 'enabled' as const, budget_tokens: 10000 },
+        ...this.proxyMetadata(),
+        system: this.buildSystem(systemPrompt),
+        messages: [{ role: 'user', content: userMessage }],
+      }, { timeout: 300_000 })
 
-    // 流式 thinking 进度
-    let thinkingLineCount = 0
-    stream.on('thinking', (_delta: string, snapshot: string) => {
-      const lines = snapshot.split('\n').length
-      if (lines - thinkingLineCount >= 3) {
-        thinkingLineCount = lines
-        const display = snapshot.length > 800
-          ? '...\n' + snapshot.slice(-800)
-          : snapshot
-        onProgress?.(`**Opus 分析中...**\n\n${display}`)
-      }
-    })
+      // 流式 thinking 进度
+      let thinkingLineCount = 0
+      stream.on('thinking', (_delta: string, snapshot: string) => {
+        const lines = snapshot.split('\n').length
+        if (lines - thinkingLineCount >= 3) {
+          thinkingLineCount = lines
+          const display = snapshot.length > 800
+            ? '...\n' + snapshot.slice(-800)
+            : snapshot
+          onProgress?.(`**Opus 分析中...**\n\n${display}`)
+        }
+      })
 
-    const response = await stream.finalMessage()
+      return await stream.finalMessage()
+    }, { maxRetries: 3, baseDelay: 2000, retryable: isProxyRetryable })
     log.info({
       model: OPUS,
       duration: Date.now() - start,
@@ -268,38 +281,39 @@ export class ClaudeClient {
 
     const mediaType = mimeType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
 
-    const stream = this.client.messages.stream({
-      model: HAIKU,
-      max_tokens: 4096,
-      ...this.proxyMetadata(),
-      system: this.buildSystem(visionSystemPrompt),
-      messages: [{
-        role: 'user',
-        content: [
-          {
-            type: 'image',
-            source: {
-              type: 'base64',
-              media_type: mediaType,
-              data: imageBuffer.toString('base64'),
+    const response = await withRetry(async () => {
+      const stream = this.client.messages.stream({
+        model: HAIKU,
+        max_tokens: 4096,
+        ...this.proxyMetadata(),
+        system: this.buildSystem(visionSystemPrompt),
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: mediaType,
+                data: imageBuffer.toString('base64'),
+              },
             },
-          },
-          {
-            type: 'text',
-            text: visionUserPrompt(text),
-          },
-        ],
-      }],
-      // A5: 使用 tool_use 获取结构化输出
-      tools: [{
-        name: 'generate_note',
-        description: '生成结构化笔记数据',
-        input_schema: noteSchema,
-      }],
-      tool_choice: { type: 'tool', name: 'generate_note' },
-    })
-
-    const response = await stream.finalMessage()
+            {
+              type: 'text',
+              text: visionUserPrompt(text),
+            },
+          ],
+        }],
+        // A5: 使用 tool_use 获取结构化输出
+        tools: [{
+          name: 'generate_note',
+          description: '生成结构化笔记数据',
+          input_schema: noteSchema,
+        }],
+        tool_choice: { type: 'tool', name: 'generate_note' },
+      })
+      return await stream.finalMessage()
+    }, { maxRetries: 3, baseDelay: 1000, retryable: isProxyRetryable })
 
     log.info({
       model: HAIKU,
@@ -330,7 +344,7 @@ export class ClaudeClient {
     }
   }
 
-  /** 结构化输出调用（流式 + Prompt Caching + JSON Schema） */
+  /** 结构化输出调用（流式 + Prompt Caching + JSON Schema + 代理重试） */
   private async structuredCall(
     model: string,
     systemPrompt: string,
@@ -338,24 +352,26 @@ export class ClaudeClient {
     rawContent?: string,
   ): Promise<NoteSchemaOutput> {
     const start = Date.now()
-    const stream = this.client.messages.stream({
-      model,
-      max_tokens: 8192,
-      ...this.proxyMetadata(),
-      system: this.buildSystem(systemPrompt),
-      messages: [{
-        role: 'user',
-        content: this.buildUserContent(userMessage, rawContent),
-      }],
-      tools: [{
-        name: 'generate_note',
-        description: '生成结构化笔记数据',
-        input_schema: noteSchema,
-      }],
-      tool_choice: { type: 'tool', name: 'generate_note' },
-    })
 
-    const response = await stream.finalMessage()
+    const response = await withRetry(async () => {
+      const stream = this.client.messages.stream({
+        model,
+        max_tokens: 8192,
+        ...this.proxyMetadata(),
+        system: this.buildSystem(systemPrompt),
+        messages: [{
+          role: 'user',
+          content: this.buildUserContent(userMessage, rawContent),
+        }],
+        tools: [{
+          name: 'generate_note',
+          description: '生成结构化笔记数据',
+          input_schema: noteSchema,
+        }],
+        tool_choice: { type: 'tool', name: 'generate_note' },
+      })
+      return await stream.finalMessage()
+    }, { maxRetries: 3, baseDelay: 1000, retryable: isProxyRetryable })
 
     log.info({
       model,
