@@ -12,6 +12,75 @@ const log = createLogger('agent-loop')
 /** Agent 循环的最大迭代次数 */
 const MAX_ITERATIONS = 15
 
+/** Claude Code 请求指纹 — 用于通过代理验证 */
+const CC_HEADERS: Record<string, string> = {
+  'User-Agent': 'claude-cli/2.1.39 (external, cli)',
+  'x-app': 'cli',
+  'anthropic-beta': 'claude-code-20250219,prompt-caching-scope-2026-01-05,effort-2025-11-24,adaptive-thinking-2026-01-28',
+  'x-stainless-lang': 'js',
+  'x-stainless-package-version': '0.73.0',
+  'x-stainless-os': 'Windows',
+  'x-stainless-arch': 'x64',
+  'x-stainless-runtime': 'node',
+  'x-stainless-runtime-version': process.version,
+}
+
+/** CC 标识 system blocks — 代理要求恰好 2 个 */
+const CC_SYSTEM_BLOCKS = [
+  {
+    type: 'text' as const,
+    text: "You are Claude Code, Anthropic's official CLI for Claude.",
+    cache_control: { type: 'ephemeral' as const },
+  },
+  {
+    type: 'text' as const,
+    text: 'You are an interactive CLI tool that helps users with software engineering tasks.',
+    cache_control: { type: 'ephemeral' as const },
+  },
+]
+
+/**
+ * 创建代理兼容的 fetch — 修复 AI SDK 与代理的兼容性问题：
+ * 1. 替换 system 为 CC 双 block 格式（代理要求恰好 2 个 block + cache_control）
+ * 2. 修复 tools 的 input_schema（AI SDK Anthropic provider 丢失属性）
+ */
+function createProxyFetch(toolSchemas: Map<string, Record<string, unknown>>): typeof globalThis.fetch {
+  return async (url: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.body && typeof init.body === 'string') {
+      try {
+        const body = JSON.parse(init.body)
+        // 修复 1: 替换 system 为 CC 双 block 格式
+        let systemText = ''
+        if (Array.isArray(body.system)) {
+          systemText = body.system.map((b: { text?: string }) => b.text || '').join('\n')
+        } else if (typeof body.system === 'string') {
+          systemText = body.system
+        }
+        body.system = [
+          CC_SYSTEM_BLOCKS[0],
+          {
+            ...CC_SYSTEM_BLOCKS[1],
+            text: CC_SYSTEM_BLOCKS[1].text + (systemText ? '\n\n' + systemText : ''),
+          },
+        ]
+        // 修复 2: 用 registry 的原始 schema 替换 AI SDK 生成的空 input_schema
+        if (Array.isArray(body.tools)) {
+          for (const tool of body.tools) {
+            const schema = toolSchemas.get(tool.name)
+            if (schema) {
+              tool.input_schema = schema
+            }
+          }
+        }
+        init = { ...init, body: JSON.stringify(body) }
+      } catch {
+        // JSON 解析失败，原样发送
+      }
+    }
+    return globalThis.fetch(url, init)
+  }
+}
+
 /** AgentLoop 配置 */
 export interface AgentLoopConfig {
   apiKey: string
@@ -31,9 +100,22 @@ export class AgentLoop {
     private sessionRepo: SessionRepo,
     private config: AgentLoopConfig,
   ) {
+    // 代理 URL 需要追加 /v1（Anthropic 原生 SDK 自动追加，AI SDK 不会）
+    const baseURL = config.baseURL
+      ? (config.baseURL.endsWith('/v1') ? config.baseURL : `${config.baseURL}/v1`)
+      : undefined
+
+    // 构建 tool schema 映射（供 createProxyFetch 修复 input_schema 用）
+    const toolSchemas = new Map<string, Record<string, unknown>>()
+    for (const t of registry.getAll()) {
+      toolSchemas.set(t.name, t.parameters)
+    }
+
     this.anthropic = createAnthropic({
       apiKey: config.apiKey,
-      baseURL: config.baseURL || undefined,
+      baseURL,
+      // 代理模式：CC 指纹头 + 自定义 fetch 注入 system blocks + 修复 tools
+      ...(config.baseURL ? { headers: CC_HEADERS, fetch: createProxyFetch(toolSchemas) } : {}),
     })
   }
 
