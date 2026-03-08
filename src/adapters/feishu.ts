@@ -4,6 +4,8 @@ import { BaseAdapter } from './base.js'
 import { FeishuResponder } from '../responder/feishu.js'
 import type { RawMessage, CommandType } from '../types/index.js'
 import type { PipelineEngine } from '../pipeline/engine.js'
+import type { AgentLoop } from '../agent/loop.js'
+import type { ToolContext } from '../tools/base.js'
 import { createLogger } from '../utils/logger.js'
 
 const log = createLogger('feishu-adapter')
@@ -20,8 +22,9 @@ export class FeishuAdapter extends BaseAdapter {
     pipeline: PipelineEngine,
     appId: string,
     appSecret: string,
+    agentLoop?: AgentLoop,
   ) {
-    super(pipeline)
+    super(pipeline, agentLoop)
 
     this.client = new lark.Client({
       appId,
@@ -99,7 +102,29 @@ export class FeishuAdapter extends BaseAdapter {
     // 构造 RawMessage
     const raw = await this.buildRawMessage(messageId, msgType, contentStr)
 
-    // #digest 指令拦截 — 不走常规管道
+    // Agent 模式：走 AgentLoop
+    if (this.agentLoop) {
+      const context: ToolContext = {
+        sessionId: chatId,
+        chatId,
+        responder,
+      }
+      setImmediate(async () => {
+        try {
+          const reply = await this.agentLoop!.run(raw.rawText, context)
+          // Agent 回复通过 responder 发送（如果工具内部没有发送卡片）
+          if (reply) {
+            await responder.closeStreaming('完成', reply)
+          }
+        } catch (error) {
+          log.error({ messageId, error: String(error) }, 'Agent 执行失败')
+          await responder.closeStreaming('处理失败', String(error), 'red')
+        }
+      })
+      return
+    }
+
+    // 降级：#digest 指令拦截 — 不走常规管道
     if (raw.rawText.trim().toLowerCase().startsWith('#digest') && this.digestHandler) {
       await responder.onProgress({} as import('../types/index.js').PipelineContext, '正在生成每日简报...')
       const progressCb = (msg: string) => {

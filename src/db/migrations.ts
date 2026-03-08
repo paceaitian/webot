@@ -49,6 +49,21 @@ const migrations: Migration[] = [
       db.exec('ALTER TABLE jobs ADD COLUMN extracted_json TEXT')
     },
   },
+  {
+    version: 3,
+    description: 'Agent 多轮对话 sessions 表',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS sessions (
+          id TEXT PRIMARY KEY,
+          messages TEXT NOT NULL DEFAULT '[]',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          metadata TEXT
+        )
+      `)
+    },
+  },
 ]
 
 /**

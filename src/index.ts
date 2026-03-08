@@ -3,10 +3,14 @@ import { loadConfig } from './config.js'
 import { AppDatabase } from './db/database.js'
 import { MessageRepo } from './db/repositories/message-repo.js'
 import { JobRepo } from './db/repositories/job-repo.js'
+import { SessionRepo } from './db/repositories/session-repo.js'
 import { PipelineEngine } from './pipeline/engine.js'
 import { ContentExtractor } from './extractor/index.js'
 import { AIProcessor } from './processor/index.js'
 import { ObsidianWriter } from './writer/obsidian-writer.js'
+import { ToolRegistry } from './tools/registry.js'
+import { SaveTool } from './tools/save.js'
+import { AgentLoop } from './agent/loop.js'
 import { CliAdapter } from './adapters/cli.js'
 import { FeishuAdapter } from './adapters/feishu.js'
 import { createLogger } from './utils/logger.js'
@@ -85,6 +89,16 @@ async function main() {
   // 构建管道引擎
   const pipeline = new PipelineEngine(messageRepo, jobRepo, extractor, processor, writer)
 
+  // 初始化 Agent 组件
+  const sessionRepo = new SessionRepo(db.db)
+  const toolRegistry = new ToolRegistry()
+  toolRegistry.register(new SaveTool(pipeline))
+  const agentLoop = new AgentLoop(toolRegistry, sessionRepo, {
+    apiKey: config.anthropicApiKey,
+    baseURL: config.anthropicBaseUrl || undefined,
+  })
+  log.info({ tools: toolRegistry.getAll().map((t) => t.name) }, 'Agent 已初始化')
+
   // 当前活跃适配器（用于优雅关闭）
   let activeAdapter: CliAdapter | FeishuAdapter | null = null
 
@@ -125,11 +139,11 @@ async function main() {
 
   if (config.cliMode) {
     // CLI 模式
-    activeAdapter = new CliAdapter(pipeline)
+    activeAdapter = new CliAdapter(pipeline, agentLoop)
     await activeAdapter.start()
   } else {
     // 飞书 WebSocket 模式
-    activeAdapter = new FeishuAdapter(pipeline, config.feishuAppId, config.feishuAppSecret)
+    activeAdapter = new FeishuAdapter(pipeline, config.feishuAppId, config.feishuAppSecret, agentLoop)
     await activeAdapter.start()
 
     // 每日简报
