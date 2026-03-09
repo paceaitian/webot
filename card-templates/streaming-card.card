@@ -1,0 +1,40 @@
+{
+  "name": "webot-streaming",
+  "dsl": {
+    "schema": "2.0",
+    "config": {
+      "streaming_mode": true,
+      "summary": {
+        "content": "处理中..."
+      },
+      "streaming_config": {
+        "print_frequency_ms": {
+          "default": 50
+        },
+        "print_step": {
+          "default": 2
+        },
+        "print_strategy": "fast"
+      }
+    },
+    "header": {
+      "title": {
+        "tag": "plain_text",
+        "content": "处理中"
+      },
+      "template": "blue"
+    },
+    "body": {
+      "direction": "vertical",
+      "padding": "12px 12px 12px 12px",
+      "elements": [
+        {
+          "tag": "markdown",
+          "content": "正在接收消息...",
+          "element_id": "progress_text"
+        }
+      ]
+    }
+  },
+  "variables": []
+}

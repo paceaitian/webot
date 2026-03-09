@@ -1,91 +1,27 @@
 // Agent 核心循环 — ReAct 模式（Reason + Act）
-import { generateText, jsonSchema } from 'ai'
-import { createAnthropic } from '@ai-sdk/anthropic'
+import { generateText, jsonSchema, stepCountIs } from 'ai'
+import { createOpenAI } from '@ai-sdk/openai'
 import type { ToolRegistry } from '../tools/registry.js'
 import type { SessionRepo, SessionMessage } from '../db/repositories/session-repo.js'
 import type { ToolContext } from '../tools/base.js'
+import type { ContextManager } from './context-manager.js'
+import type { MemoryRepo, Memory } from '../db/repositories/memory-repo.js'
 import { buildSystemPrompt } from './system-prompt.js'
 import { createLogger } from '../utils/logger.js'
 
 const log = createLogger('agent-loop')
 
-/** Agent 循环的最大迭代次数 */
-const MAX_ITERATIONS = 15
+/** Agent 循环最大工具调用轮数 */
+const MAX_STEPS = 10
 
-/** Claude Code 请求指纹 — 用于通过代理验证 */
-const CC_HEADERS: Record<string, string> = {
-  'User-Agent': 'claude-cli/2.1.39 (external, cli)',
-  'x-app': 'cli',
-  'anthropic-beta': 'claude-code-20250219,prompt-caching-scope-2026-01-05,effort-2025-11-24,adaptive-thinking-2026-01-28',
-  'x-stainless-lang': 'js',
-  'x-stainless-package-version': '0.73.0',
-  'x-stainless-os': 'Windows',
-  'x-stainless-arch': 'x64',
-  'x-stainless-runtime': 'node',
-  'x-stainless-runtime-version': process.version,
-}
-
-/** CC 标识 system blocks — 代理要求恰好 2 个 */
-const CC_SYSTEM_BLOCKS = [
-  {
-    type: 'text' as const,
-    text: "You are Claude Code, Anthropic's official CLI for Claude.",
-    cache_control: { type: 'ephemeral' as const },
-  },
-  {
-    type: 'text' as const,
-    text: 'You are an interactive CLI tool that helps users with software engineering tasks.',
-    cache_control: { type: 'ephemeral' as const },
-  },
-]
-
-/**
- * 创建代理兼容的 fetch — 修复 AI SDK 与代理的兼容性问题：
- * 1. 替换 system 为 CC 双 block 格式（代理要求恰好 2 个 block + cache_control）
- * 2. 修复 tools 的 input_schema（AI SDK Anthropic provider 丢失属性）
- */
-function createProxyFetch(toolSchemas: Map<string, Record<string, unknown>>): typeof globalThis.fetch {
-  return async (url: RequestInfo | URL, init?: RequestInit) => {
-    if (init?.body && typeof init.body === 'string') {
-      try {
-        const body = JSON.parse(init.body)
-        // 修复 1: 替换 system 为 CC 双 block 格式
-        let systemText = ''
-        if (Array.isArray(body.system)) {
-          systemText = body.system.map((b: { text?: string }) => b.text || '').join('\n')
-        } else if (typeof body.system === 'string') {
-          systemText = body.system
-        }
-        body.system = [
-          CC_SYSTEM_BLOCKS[0],
-          {
-            ...CC_SYSTEM_BLOCKS[1],
-            text: CC_SYSTEM_BLOCKS[1].text + (systemText ? '\n\n' + systemText : ''),
-          },
-        ]
-        // 修复 2: 用 registry 的原始 schema 替换 AI SDK 生成的空 input_schema
-        if (Array.isArray(body.tools)) {
-          for (const tool of body.tools) {
-            const schema = toolSchemas.get(tool.name)
-            if (schema) {
-              tool.input_schema = schema
-            }
-          }
-        }
-        init = { ...init, body: JSON.stringify(body) }
-      } catch {
-        // JSON 解析失败，原样发送
-      }
-    }
-    return globalThis.fetch(url, init)
-  }
-}
+/** 默认模型 */
+const DEFAULT_MODEL = 'glm-4.7'
 
 /** AgentLoop 配置 */
 export interface AgentLoopConfig {
   apiKey: string
   baseURL?: string
-  /** 默认模型（默认 haiku） */
+  /** 默认模型 */
   defaultModel?: string
 }
 
@@ -93,29 +29,18 @@ export interface AgentLoopConfig {
  * Agent 核心循环 — 接收用户输入，通过 ReAct 循环调用工具完成任务
  */
 export class AgentLoop {
-  private anthropic: ReturnType<typeof createAnthropic>
+  private openai: ReturnType<typeof createOpenAI>
 
   constructor(
     private registry: ToolRegistry,
     private sessionRepo: SessionRepo,
     private config: AgentLoopConfig,
+    private contextManager?: ContextManager,
+    private memoryRepo?: MemoryRepo,
   ) {
-    // 代理 URL 需要追加 /v1（Anthropic 原生 SDK 自动追加，AI SDK 不会）
-    const baseURL = config.baseURL
-      ? (config.baseURL.endsWith('/v1') ? config.baseURL : `${config.baseURL}/v1`)
-      : undefined
-
-    // 构建 tool schema 映射（供 createProxyFetch 修复 input_schema 用）
-    const toolSchemas = new Map<string, Record<string, unknown>>()
-    for (const t of registry.getAll()) {
-      toolSchemas.set(t.name, t.parameters)
-    }
-
-    this.anthropic = createAnthropic({
+    this.openai = createOpenAI({
       apiKey: config.apiKey,
-      baseURL,
-      // 代理模式：CC 指纹头 + 自定义 fetch 注入 system blocks + 修复 tools
-      ...(config.baseURL ? { headers: CC_HEADERS, fetch: createProxyFetch(toolSchemas) } : {}),
+      baseURL: config.baseURL || undefined,
     })
   }
 
@@ -124,87 +49,60 @@ export class AgentLoop {
    * @returns Agent 最终的文本回复
    */
   async run(input: string, context: ToolContext): Promise<string> {
-    this.sessionRepo.addMessage(context.chatId, { role: 'user', content: input })
+    this.sessionRepo.addMessage(context.sessionId, { role: 'user', content: input })
 
-    const modelId = this.config.defaultModel ?? 'claude-haiku-4-5-20251001'
-    let currentModel = modelId
-    let iterations = 0
+    const modelId = this.config.defaultModel ?? DEFAULT_MODEL
 
-    while (iterations++ < MAX_ITERATIONS) {
-      const history = this.sessionRepo.getHistory(context.chatId)
-
-      log.info({ iteration: iterations, model: currentModel, messageCount: history.length }, 'Agent 循环迭代')
-
-      try {
-        // 构建 Vercel AI SDK tools
-        const aiTools = this.buildAITools(context)
-
-        const result = await generateText({
-          model: this.anthropic(currentModel),
-          system: buildSystemPrompt(this.registry.getDefinitions()),
-          messages: this.convertMessages(history),
-          tools: aiTools,
-        })
-
-        // 有工具调用
-        if (result.toolCalls && result.toolCalls.length > 0) {
-          // tool results 已由 AI SDK 自动执行（因为 tool 有 execute）
-          // 记录到 session
-          for (const toolCall of result.toolCalls) {
-            this.sessionRepo.addMessage(context.chatId, {
-              role: 'assistant',
-              content: `[调用工具 ${toolCall.toolName}]`,
-            })
-          }
-
-          for (const toolResult of result.toolResults) {
-            const output = toolResult.output
-            const resultText = typeof output === 'string'
-              ? output
-              : JSON.stringify(output)
-            this.sessionRepo.addMessage(context.chatId, {
-              role: 'tool_result',
-              content: resultText,
-              toolUseId: toolResult.toolCallId,
-            })
-
-            // 检查是否有模型升级建议
-            if (typeof output === 'object' && output !== null) {
-              const r = output as Record<string, unknown>
-              if (r._upgradeModel && typeof r._upgradeModel === 'string') {
-                currentModel = r._upgradeModel
-                log.info({ newModel: currentModel }, '模型已升级')
-              }
-            }
-          }
-
-          // 如果有文本回复（部分模型在 tool_use 同时返回文本）
-          if (result.text) {
-            this.sessionRepo.addMessage(context.chatId, { role: 'assistant', content: result.text })
-            log.info({ iterations, textLength: result.text.length }, 'Agent 循环结束（工具 + 文本）')
-            return result.text
-          }
-
-          // 继续循环让 LLM 看到工具结果
-          continue
-        }
-
-        // 纯文本回复 → 结束循环
-        const text = result.text || '（无回复）'
-        this.sessionRepo.addMessage(context.chatId, { role: 'assistant', content: text })
-        log.info({ iterations, textLength: text.length }, 'Agent 循环结束')
-        return text
-
-      } catch (error) {
-        const errMsg = error instanceof Error ? error.message : String(error)
-        log.error({ error: errMsg, iteration: iterations }, 'LLM 调用失败')
-        return `抱歉，处理时出错: ${errMsg}`
-      }
+    // 使用 ContextManager 获取消息（滑动窗口 + 压缩）
+    let history: SessionMessage[]
+    if (this.contextManager) {
+      await this.contextManager.compressIfNeeded(context.sessionId, context.userId)
+      history = await this.contextManager.getContextMessages(context.sessionId, context.userId)
+    } else {
+      history = this.sessionRepo.getHistory(context.sessionId)
     }
 
-    const maxMsg = `任务步骤过多（超过 ${MAX_ITERATIONS} 轮），已停止执行。`
-    this.sessionRepo.addMessage(context.chatId, { role: 'assistant', content: maxMsg })
-    return maxMsg
+    // 加载用户记忆注入 system prompt
+    let memories: Memory[] = []
+    if (this.memoryRepo) {
+      const userMemories = this.memoryRepo.getUserMemories(context.userId, ['preference', 'fact'])
+      const summaries = this.memoryRepo.getRecentSummaries(context.userId, 5)
+      memories = [...userMemories, ...summaries]
+    }
+
+    log.info({ model: modelId, messageCount: history.length }, 'Agent 开始处理')
+
+    try {
+      const aiTools = this.buildAITools(context)
+
+      const result = await generateText({
+        model: this.openai.chat(modelId),
+        system: buildSystemPrompt(this.registry.getDefinitions(), memories),
+        messages: this.convertMessages(history),
+        tools: aiTools,
+        stopWhen: stepCountIs(MAX_STEPS),
+        onStepFinish: async ({ toolCalls }) => {
+          if (toolCalls && toolCalls.length > 0) {
+            const names = toolCalls.map((tc: { toolName: string }) => tc.toolName).join(', ')
+            log.info({ tools: names }, '工具调用完成')
+          }
+        },
+      })
+
+      const text = result.text || '（无回复）'
+      this.sessionRepo.addMessage(context.sessionId, { role: 'assistant', content: text })
+
+      log.info({
+        steps: result.steps?.length ?? 0,
+        textLength: text.length,
+      }, 'Agent 处理完成')
+
+      return text
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error)
+      log.error({ error: errMsg }, 'LLM 调用失败')
+      return `抱歉，处理时出错: ${errMsg}`
+    }
   }
 
   /** 构建 Vercel AI SDK tools 对象 */
@@ -218,12 +116,22 @@ export class AgentLoop {
         description: t.description,
         parameters: jsonSchema(t.parameters),
         execute: async (params: Record<string, unknown>) => {
-          log.info({ tool: toolRef.name }, '执行工具')
+          log.info({ tool: toolRef.name, params }, '执行工具')
+
+          // 校验必需参数 — GLM-4.7 有时传空对象
+          const required = (toolRef.parameters.required as string[] | undefined) ?? []
+          const missing = required.filter(k => params[k] === undefined || params[k] === '')
+          if (missing.length > 0) {
+            const hint = missing.map(k => {
+              const prop = (toolRef.parameters.properties as Record<string, { description?: string }>)?.[k]
+              return `${k}: ${prop?.description ?? '必填'}`
+            }).join('; ')
+            log.warn({ tool: toolRef.name, missing }, '工具缺少必需参数')
+            return `参数错误：缺少 ${missing.join(', ')}。请提供：${hint}`
+          }
+
           await context.responder.onProgress({} as never, `正在执行 ${toolRef.name}...`)
           const result = await toolRef.execute(params, context)
-          if (result.upgradeModel) {
-            return { ...result, _upgradeModel: result.upgradeModel }
-          }
           return result.content
         },
       }
@@ -234,8 +142,8 @@ export class AgentLoop {
   /** 将 SessionMessage 转为 Vercel AI SDK messages 格式 */
   private convertMessages(messages: SessionMessage[]): Array<{ role: 'user' | 'assistant'; content: string }> {
     return messages.map((m) => ({
-      role: m.role === 'tool_result' ? 'user' as const : m.role as 'user' | 'assistant',
-      content: m.content,
+      role: (m.role === 'tool_result' || m.role === 'system_summary') ? 'user' as const : m.role as 'user' | 'assistant',
+      content: m.role === 'system_summary' ? `[对话摘要] ${m.content}` : m.content,
     }))
   }
 }

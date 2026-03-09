@@ -12,8 +12,8 @@ const log = createLogger('processor')
 export class AIProcessor implements Processor {
   private claude: ClaudeClient
 
-  constructor(apiKey: string, baseUrl?: string) {
-    this.claude = new ClaudeClient(apiKey, baseUrl)
+  constructor(apiKey: string, baseUrl?: string, model?: string) {
+    this.claude = new ClaudeClient(apiKey, baseUrl, model)
   }
 
   /** 获取 ClaudeClient 实例（供 DigestEngine 使用） */
@@ -71,14 +71,16 @@ export class AIProcessor implements Processor {
         break
     }
 
-    log.info({ title: result.title, model: result.model, tags: result.tags.length }, 'AI 处理完成')
+    // 防御性访问 — GLM-4.7 function calling 可能缺少字段
+    const tags = result.tags ?? []
+    log.info({ title: result.title, model: result.model, tags: tags.length }, 'AI 处理完成')
 
     return {
-      title: result.title,
-      summary: result.summary,
-      keyPoints: result.key_points,
-      tags: result.tags,
-      content: result.content,
+      title: result.title ?? '未命名',
+      summary: result.summary ?? '',
+      keyPoints: result.key_points ?? '',
+      tags,
+      content: result.content ?? '',
       model: result.model,
       isDraft: false,
     }

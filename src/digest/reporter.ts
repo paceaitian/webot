@@ -95,7 +95,7 @@ function buildChannelItemsMd(cd: ChannelDigest): string {
         const desc = item.description ? `\n   ${item.description}` : ''
         return `${i + 1}. [${item.title}](${item.url})${stars ? ` ⭐ ${stars} today` : ''}${desc}`
       }
-      return `${i + 1}. [**${item.aiTitle}**](${item.url}) — ${item.source}\n   ${item.aiSummary}`
+      return `${i + 1}. [**${item.aiTitle ?? item.title}**](${item.url}) — ${item.source}\n   ${item.aiSummary ?? ''}`
     }
     // 非技术渠道：直接原标题
     return `${i + 1}. [${item.title}](${item.url})`
@@ -144,7 +144,7 @@ export async function writeDigestToObsidian(
         sections.push('|---|------|------|------|------|')
         cd.items.forEach((item, i) => {
           if (isScoredItem(item)) {
-            const t = item.aiTitle.replace(/\|/g, '\\|')
+            const t = (item.aiTitle ?? item.title).replace(/\|/g, '\\|')
             sections.push(`| ${i + 1} | [${t}](${item.url}) | ${item.source} | ${item.category} | ${item.totalScore} |`)
           } else {
             sections.push(`| ${i + 1} | [${item.title}](${item.url}) | ${item.source} | - | - |`)
@@ -182,5 +182,5 @@ export async function writeDigestToObsidian(
  * 格式化 ScoredItem 为简短文本（用于日志/调试）
  */
 export function formatScoredItem(item: ScoredItem): string {
-  return `[${item.category}] ${item.aiTitle} (${item.totalScore}分) — ${item.source}`
+  return `[${item.category ?? '未分类'}] ${item.aiTitle ?? item.title} (${item.totalScore}分) — ${item.source}`
 }

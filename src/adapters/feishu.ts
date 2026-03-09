@@ -16,7 +16,6 @@ const log = createLogger('feishu-adapter')
 export class FeishuAdapter extends BaseAdapter {
   private client: lark.Client
   private wsClient: lark.WSClient
-  private digestHandler?: (onProgress: (msg: string) => void) => Promise<void>
 
   constructor(
     pipeline: PipelineEngine,
@@ -91,7 +90,11 @@ export class FeishuAdapter extends BaseAdapter {
     const msgType = message.message_type as string
     const contentStr = message.content as string
 
-    log.info({ messageId, chatId, msgType }, '收到飞书消息')
+    // 提取发送者 userId（群聊按用户隔离会话）
+    const sender = (data as { sender?: { sender_id?: { open_id?: string } } }).sender
+    const userId = sender?.sender_id?.open_id ?? 'unknown'
+
+    log.info({ messageId, chatId, msgType, userId }, '收到飞书消息')
 
     // 创建响应器（用于卡片进度反馈）
     const responder = new FeishuResponder(this.client, chatId, messageId)
@@ -105,8 +108,9 @@ export class FeishuAdapter extends BaseAdapter {
     // Agent 模式：走 AgentLoop
     if (this.agentLoop) {
       const context: ToolContext = {
-        sessionId: chatId,
+        sessionId: `${chatId}:${userId}`,
         chatId,
+        userId,
         responder,
       }
       setImmediate(async () => {
@@ -119,24 +123,6 @@ export class FeishuAdapter extends BaseAdapter {
         } catch (error) {
           log.error({ messageId, error: String(error) }, 'Agent 执行失败')
           await responder.closeStreaming('处理失败', String(error), 'red')
-        }
-      })
-      return
-    }
-
-    // 降级：#digest 指令拦截 — 不走常规管道
-    if (raw.rawText.trim().toLowerCase().startsWith('#digest') && this.digestHandler) {
-      await responder.onProgress({} as import('../types/index.js').PipelineContext, '正在生成每日简报...')
-      const progressCb = (msg: string) => {
-        responder.onProgress({} as import('../types/index.js').PipelineContext, msg).catch(() => {})
-      }
-      setImmediate(async () => {
-        try {
-          await this.digestHandler!(progressCb)
-          await responder.closeStreaming('简报已发送', '简报卡片已单独发送，请查看下方消息')
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err)
-          await responder.closeStreaming('简报生成失败', msg, 'red')
         }
       })
       return
@@ -290,11 +276,6 @@ export class FeishuAdapter extends BaseAdapter {
         log.error({ jobId, command, error: String(error) }, '二次处理失败')
       }
     })
-  }
-
-  /** 设置 #digest 处理器（接收 onProgress 回调用于流式进度更新） */
-  setDigestHandler(handler: (onProgress: (msg: string) => void) => Promise<void>): void {
-    this.digestHandler = handler
   }
 
   /** 获取飞书客户端（供外部使用） */

@@ -64,6 +64,25 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    version: 4,
+    description: '长期记忆 memories 表',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS memories (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          chat_id TEXT,
+          type TEXT NOT NULL,
+          content TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_memories_user ON memories(user_id);
+        CREATE INDEX IF NOT EXISTS idx_memories_user_type ON memories(user_id, type);
+      `)
+    },
+  },
 ]
 
 /**

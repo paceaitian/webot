@@ -246,13 +246,13 @@ export class DigestEngine {
 
           allScored.push({
             ...original,
-            relevance: scored.relevance,
-            quality: scored.quality,
-            timeliness: scored.timeliness,
-            totalScore: scored.relevance + scored.quality + scored.timeliness,
-            aiTitle: scored.ai_title,
-            aiSummary: scored.ai_summary,
-            category: scored.category,
+            relevance: scored.relevance ?? 0,
+            quality: scored.quality ?? 0,
+            timeliness: scored.timeliness ?? 0,
+            totalScore: (scored.relevance ?? 0) + (scored.quality ?? 0) + (scored.timeliness ?? 0),
+            aiTitle: scored.ai_title ?? original.title,
+            aiSummary: scored.ai_summary ?? '',
+            category: scored.category ?? '未分类',
           })
         }
       } catch (err) {
@@ -418,7 +418,7 @@ export class DigestEngine {
     let bestScore = 0
 
     for (const item of items) {
-      const target = `${item.aiTitle} ${item.title}`.toLowerCase()
+      const target = `${item.aiTitle ?? ''} ${item.title}`.toLowerCase()
       const matchCount = keywords.filter(kw => target.includes(kw.toLowerCase())).length
       if (matchCount > bestScore) {
         bestScore = matchCount
@@ -543,7 +543,7 @@ export class DigestEngine {
    */
   private fallbackAnalysis(top: ScoredItem[], rawMd?: string): DigestAnalysis {
     return {
-      quickRead: rawMd || top.slice(0, 5).map(i => `- ${i.aiTitle}`).join('\n'),
+      quickRead: rawMd || top.slice(0, 5).map(i => `- ${i.aiTitle ?? i.title}`).join('\n'),
       top5: top.slice(0, 5).map(item => ({
         item,
         reason: item.aiSummary,

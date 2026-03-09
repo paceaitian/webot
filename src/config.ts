@@ -25,6 +25,10 @@ export interface AppConfig {
   digestCron: string
   /** 每日简报推送目标群 chat_id */
   digestChatId: string
+  /** Serper API Key（可选，用于网络搜索） */
+  serperApiKey: string
+  /** AI 模型 ID（默认 glm-4.7） */
+  aiModel: string
 }
 
 /**
@@ -45,6 +49,8 @@ export function loadConfig(): AppConfig {
     cliMode,
     digestCron: process.env.DIGEST_CRON ?? '0 9 * * *',
     digestChatId: process.env.DIGEST_CHAT_ID ?? '',
+    serperApiKey: process.env.SERPER_API_KEY ?? '',
+    aiModel: process.env.AI_MODEL ?? 'glm-4.7',
   }
 
   // 必须配置项校验

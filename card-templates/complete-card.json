@@ -1,0 +1,212 @@
+{
+  "schema": "2.0",
+  "header": {
+    "title": {
+      "tag": "plain_text",
+      "content": "AI 桌面操控机器人：从实验到开源的完整历程"
+    },
+    "template": "green",
+    "subtitle": {
+      "tag": "plain_text",
+      "content": "mp.weixin.qq.com"
+    },
+    "text_tag_list": [
+      {
+        "tag": "text_tag",
+        "text": { "tag": "plain_text", "content": "save" },
+        "color": "blue"
+      },
+      {
+        "tag": "text_tag",
+        "text": { "tag": "plain_text", "content": "Haiku" },
+        "color": "turquoise"
+      }
+    ]
+  },
+  "body": {
+    "elements": [
+      {
+        "tag": "markdown",
+        "content": "**作者通过 Claude Code 实现微信自动发消息的桌面操控机器人，开源后遭受社区攻击，引发 AI 安全讨论。**"
+      },
+      { "tag": "hr" },
+      {
+        "tag": "markdown",
+        "content": "**摘要**\n- 核心技术栈：Playwright + 系统级自动化，实现桌面应用操控\n- 通过 Claude Code 的 MCP 协议与本地工具集成\n- 开源后遭到社区恶意攻击，项目被迫下架\n- 引发关于 AI Agent 安全边界的深度讨论\n- 作者反思开源生态中的信任与风险"
+      },
+      { "tag": "hr" },
+      {
+        "tag": "column_set",
+        "flex_mode": "none",
+        "columns": [
+          {
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "<text_tag color='blue'>AI</text_tag> <text_tag color='turquoise'>自动化</text_tag> <text_tag color='green'>开源</text_tag> <text_tag color='purple'>安全</text_tag> <text_tag color='violet'>Claude</text_tag>"
+              }
+            ]
+          },
+          {
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "elements": [
+              {
+                "tag": "markdown",
+                "text_align": "right",
+                "content": "<font color='grey'>[save] AI 桌面操控机器人.md</font>"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tag": "column_set",
+        "flex_mode": "none",
+        "columns": [
+          {
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "elements": [
+              {
+                "tag": "button",
+                "text": { "tag": "plain_text", "content": "深度分析" },
+                "type": "primary_filled",
+                "size": "small",
+                "width": "fill",
+                "value": { "jobId": "demo-job-001", "command": "discuss", "mode": "new" },
+                "confirm": {
+                  "title": { "tag": "plain_text", "content": "确认深度分析" },
+                  "text": { "tag": "plain_text", "content": "将使用 Opus 模型，耗时约 1-2 分钟。确认？" }
+                }
+              }
+            ]
+          },
+          {
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "elements": [
+              {
+                "tag": "button",
+                "text": { "tag": "plain_text", "content": "提取金句" },
+                "type": "primary_filled",
+                "size": "small",
+                "width": "fill",
+                "value": { "jobId": "demo-job-001", "command": "quote", "mode": "new" }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tag": "markdown",
+        "content": "<font color='grey'>以下将替换原笔记</font>"
+      },
+      {
+        "tag": "column_set",
+        "flex_mode": "none",
+        "columns": [
+          {
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "elements": [
+              {
+                "tag": "button",
+                "text": { "tag": "plain_text", "content": "分析(替换)" },
+                "type": "primary_filled",
+                "size": "small",
+                "width": "fill",
+                "value": { "jobId": "demo-job-001", "command": "discuss", "mode": "replace" },
+                "confirm": {
+                  "title": { "tag": "plain_text", "content": "确认替换" },
+                  "text": { "tag": "plain_text", "content": "将使用 Opus 模型并替换原笔记。确认？" }
+                }
+              }
+            ]
+          },
+          {
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "elements": [
+              {
+                "tag": "button",
+                "text": { "tag": "plain_text", "content": "金句(替换)" },
+                "type": "primary_filled",
+                "size": "small",
+                "width": "fill",
+                "value": { "jobId": "demo-job-001", "command": "quote", "mode": "replace" }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tag": "form",
+        "name": "custom_form",
+        "elements": [
+          {
+            "tag": "column_set",
+            "flex_mode": "none",
+            "columns": [
+              {
+                "tag": "column",
+                "width": "auto",
+                "elements": [
+                  {
+                    "tag": "select_static",
+                    "name": "mode",
+                    "placeholder": { "tag": "plain_text", "content": "默认：新建笔记" },
+                    "options": [
+                      { "text": { "tag": "plain_text", "content": "新建笔记" }, "value": "new" },
+                      { "text": { "tag": "plain_text", "content": "替换原笔记" }, "value": "replace" }
+                    ]
+                  }
+                ]
+              },
+              {
+                "tag": "column",
+                "width": "weighted",
+                "weight": 1,
+                "elements": [
+                  {
+                    "tag": "input",
+                    "name": "user_input",
+                    "placeholder": { "tag": "plain_text", "content": "输入自定义分析指令..." }
+                  }
+                ]
+              },
+              {
+                "tag": "column",
+                "width": "auto",
+                "elements": [
+                  {
+                    "tag": "button",
+                    "text": { "tag": "plain_text", "content": "发送" },
+                    "type": "primary_filled",
+                    "size": "small",
+                    "width": "fill",
+                    "form_action_type": "submit",
+                    "name": "submit",
+                    "value": { "jobId": "demo-job-001", "command": "custom" }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tag": "markdown",
+        "content": "<font color='grey'>1948字 · Haiku · 2026-03-05 02:30</font>"
+      }
+    ]
+  }
+}

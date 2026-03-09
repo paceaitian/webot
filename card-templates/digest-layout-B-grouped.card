@@ -1,0 +1,318 @@
+{
+  "schema": "2.0",
+  "config": { "update_multi": true },
+  "header": {
+    "title": { "tag": "plain_text", "content": "每日简报 — 2026-03-07" },
+    "template": "indigo",
+    "text_tag_list": [
+      { "tag": "text_tag", "text": { "tag": "plain_text", "content": "8 源" }, "color": "blue" },
+      { "tag": "text_tag", "text": { "tag": "plain_text", "content": "95 条" }, "color": "turquoise" }
+    ]
+  },
+  "body": {
+    "direction": "vertical",
+    "elements": [
+      {
+        "tag": "markdown",
+        "content": "**30 秒速读**\n\nOpenAI 发布 GPT-5 引发行业震荡；GitHub Copilot Workspace 正式 GA；微博热搜被「某明星离婚」霸榜；A 股三大指数集体收涨，半导体板块领涨。"
+      },
+      { "tag": "hr" },
+
+      {
+        "tag": "markdown",
+        "content": "## 技术精选"
+      },
+
+      {
+        "tag": "column_set",
+        "horizontal_align": "left",
+        "columns": [
+          {
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "**Hacker News** <font color='orange'>Top 5</font>"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tag": "markdown",
+        "content": "1. [OpenAI announces GPT-5 with reasoning capabilities](https://news.ycombinator.com/item?id=1)\n2. [Show HN: I built a local-first database in Rust](https://news.ycombinator.com/item?id=2)\n3. [The state of WebAssembly in 2026](https://news.ycombinator.com/item?id=3)\n4. [Why SQLite is the most deployed database](https://news.ycombinator.com/item?id=4)\n5. [A deep dive into Linux kernel memory management](https://news.ycombinator.com/item?id=5)"
+      },
+
+      {
+        "tag": "column_set",
+        "horizontal_align": "left",
+        "columns": [
+          {
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "**Product Hunt** <font color='red'>Top 3</font>"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tag": "markdown",
+        "content": "1. [Cursor Pro — AI-native IDE with multi-file editing](https://producthunt.com/posts/1)\n2. [Supabase Realtime v2 — Multiplayer everything](https://producthunt.com/posts/2)\n3. [Raycast AI — Your intelligent command bar](https://producthunt.com/posts/3)"
+      },
+
+      {
+        "tag": "column_set",
+        "horizontal_align": "left",
+        "columns": [
+          {
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "**GitHub Trending** <font color='purple'>Top 5</font>"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tag": "markdown",
+        "content": "1. [vercel/ai](https://github.com/vercel/ai) — Build AI-powered apps ⭐ 342 today\n2. [ollama/ollama](https://github.com/ollama/ollama) — Run LLMs locally ⭐ 289 today\n3. [anthropics/claude-code](https://github.com/anthropics/claude-code) — CLI for Claude ⭐ 256 today\n4. [electric-sql/pglite](https://github.com/electric-sql/pglite) — Postgres in WASM ⭐ 198 today\n5. [juspay/hyperswitch](https://github.com/juspay/hyperswitch) — Open source payments ⭐ 167 today"
+      },
+
+      {
+        "tag": "column_set",
+        "horizontal_align": "left",
+        "columns": [
+          {
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "**V2EX** <font color='green'>Top 3</font>"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tag": "markdown",
+        "content": "1. [有没有好用的自部署 RSS 阅读器推荐？](https://v2ex.com/t/1)\n2. [2026 年了，大家都在用什么代码编辑器？](https://v2ex.com/t/2)\n3. [关于 TypeScript 5.8 的一些想法](https://v2ex.com/t/3)"
+      },
+
+      {
+        "tag": "column_set",
+        "horizontal_align": "left",
+        "columns": [
+          {
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "**RSS 精选** <font color='blue'>AI 评分 Top 5</font>"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tag": "markdown",
+        "content": "1. **Claude 4.5 深度评测：思维链的进化** — simonwillison.net\n   OpenAI 发布 GPT-5 同日，Anthropic 的 Claude 4.5 展示了...\n2. **Rust 异步运行时 2026 展望** — tokio.rs blog\n   Tokio 团队分享异步生态最新进展...\n3. **为什么我从 Next.js 迁移到 Remix** — kentcdodds.com\n   Kent C. Dodds 详述迁移背后的技术决策...\n4. **LLM 安全红队测试实践指南** — security.googleblog.com\n   Google 安全团队分享 AI 安全测试方法论...\n5. **SQLite 在生产环境的 10 个最佳实践** — fly.io blog\n   Fly.io 团队总结分布式 SQLite 部署经验..."
+      },
+
+      { "tag": "hr" },
+
+      {
+        "tag": "markdown",
+        "content": "## 国内热点"
+      },
+
+      {
+        "tag": "column_set",
+        "horizontal_align": "left",
+        "columns": [
+          {
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "**微博热搜** <font color='red'>Top 5</font>"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tag": "markdown",
+        "content": "1. [某明星官宣离婚](https://weibo.com/1)\n2. [ChatGPT 国内可直接访问](https://weibo.com/2)\n3. [iPhone 18 Pro 曝光](https://weibo.com/3)\n4. [高考倒计时 90 天](https://weibo.com/4)\n5. [全国两会热点提案](https://weibo.com/5)"
+      },
+
+      {
+        "tag": "column_set",
+        "horizontal_align": "left",
+        "columns": [
+          {
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "**知乎热榜** <font color='blue'>Top 5</font>"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tag": "markdown",
+        "content": "1. [如何评价 OpenAI 发布的 GPT-5？](https://zhihu.com/q/1)\n2. [2026 年学什么编程语言最有前途？](https://zhihu.com/q/2)\n3. [为什么越来越多程序员转行做独立开发？](https://zhihu.com/q/3)\n4. [A 股半导体板块暴涨的底层逻辑是什么？](https://zhihu.com/q/4)\n5. [有哪些值得推荐的开源 AI 项目？](https://zhihu.com/q/5)"
+      },
+
+      {
+        "tag": "column_set",
+        "horizontal_align": "left",
+        "columns": [
+          {
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "**抖音热榜** <font color='grey'>Top 3</font>"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tag": "markdown",
+        "content": "1. [某明星离婚细节曝光](https://douyin.com/1)\n2. [AI 生成的视频把人看傻了](https://douyin.com/2)\n3. [打工人的一天 vlog](https://douyin.com/3)"
+      },
+
+      {
+        "tag": "column_set",
+        "horizontal_align": "left",
+        "columns": [
+          {
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "**小红书** <font color='red'>Top 3</font>"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tag": "markdown",
+        "content": "1. [程序员转型自媒体月入 5 万经验分享](https://xiaohongshu.com/1)\n2. [2026 最值得入手的生产力工具清单](https://xiaohongshu.com/2)\n3. [独立开发者出海日记 Day 30](https://xiaohongshu.com/3)"
+      },
+
+      { "tag": "hr" },
+
+      {
+        "tag": "markdown",
+        "content": "## 国内科技"
+      },
+
+      {
+        "tag": "column_set",
+        "horizontal_align": "left",
+        "columns": [
+          {
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "**36 氪** <font color='blue'>Top 3</font>"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tag": "markdown",
+        "content": "1. [OpenAI 估值突破 3000 亿美元](https://36kr.com/1)\n2. [字节跳动 AI 部门大调整](https://36kr.com/2)\n3. [独角兽公司 2026 Q1 融资报告](https://36kr.com/3)"
+      },
+
+      { "tag": "hr" },
+
+      {
+        "tag": "markdown",
+        "content": "## 财经快讯"
+      },
+
+      {
+        "tag": "column_set",
+        "horizontal_align": "left",
+        "columns": [
+          {
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "**华尔街见闻** <font color='blue'>Top 3</font>"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tag": "markdown",
+        "content": "1. [美联储暗示 6 月降息，美股三大指数齐涨](https://wallstreetcn.com/1)\n2. [英伟达市值重回 3 万亿美元](https://wallstreetcn.com/2)\n3. [比特币突破 10 万美元创历史新高](https://wallstreetcn.com/3)"
+      },
+
+      {
+        "tag": "column_set",
+        "horizontal_align": "left",
+        "columns": [
+          {
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "**财联社** <font color='red'>Top 3</font>"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tag": "markdown",
+        "content": "1. [A 股三大指数集体收涨 半导体板块领涨](https://cls.cn/1)\n2. [央行：将适时降准降息](https://cls.cn/2)\n3. [多地楼市新政密集出台](https://cls.cn/3)"
+      },
+
+      { "tag": "hr" },
+      {
+        "tag": "markdown",
+        "content": "<font color='grey'>12 渠道 | 95 条 | Opus | 7min</font>"
+      }
+    ]
+  }
+}

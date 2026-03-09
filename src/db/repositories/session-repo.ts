@@ -3,9 +3,10 @@ import type Database from 'better-sqlite3'
 
 /** 会话消息 */
 export interface SessionMessage {
-  role: 'user' | 'assistant' | 'tool_result'
+  role: 'user' | 'assistant' | 'tool_result' | 'system_summary'
   content: string
   toolUseId?: string
+  timestamp?: string
 }
 
 /** 会话数据 */
@@ -47,6 +48,7 @@ export class SessionRepo {
 
   /** 追加消息 */
   addMessage(chatId: string, message: SessionMessage): void {
+    message.timestamp = message.timestamp ?? new Date().toISOString()
     const session = this.getOrCreate(chatId)
     session.messages.push(message)
     this.db.prepare(

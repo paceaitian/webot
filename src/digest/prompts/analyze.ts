@@ -57,9 +57,9 @@ export function analyzeUserPrompt(scoredItems: AnalyzeItem[]): string {
 
   const formatted = scoredItems
     .map((item, i) => {
-      return `${i + 1}. [${item.category}] ${item.aiTitle}（总分 ${item.totalScore}）
+      return `${i + 1}. [${item.category ?? '未分类'}] ${item.aiTitle ?? '无标题'}（总分 ${item.totalScore}）
    来源: ${item.source} | URL: ${item.url}
-   摘要: ${item.aiSummary}`
+   摘要: ${item.aiSummary ?? ''}`
     })
     .join('\n\n')
 

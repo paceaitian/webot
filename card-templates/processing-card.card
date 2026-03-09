@@ -1,0 +1,1 @@
+{"name":"webot-processing","dsl":{"schema":"2.0","config":{"update_multi":true},"header":{"title":{"tag":"plain_text","content":"处理中"},"template":"blue"},"body":{"direction":"vertical","padding":"12px 12px 12px 12px","elements":[{"tag":"markdown","content":"正在抓取网页内容..."}]}},"variables":[]}

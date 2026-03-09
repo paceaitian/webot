@@ -1,0 +1,18 @@
+{
+  "schema": "2.0",
+  "header": {
+    "title": {
+      "tag": "plain_text",
+      "content": "处理失败"
+    },
+    "template": "red"
+  },
+  "body": {
+    "elements": [
+      {
+        "tag": "markdown",
+        "content": "请求超时，稍后将自动重试"
+      }
+    ]
+  }
+}

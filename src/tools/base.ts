@@ -13,10 +13,12 @@ export interface ToolResult {
 
 /** 工具执行上下文 */
 export interface ToolContext {
-  /** 当前会话 ID */
+  /** 当前会话 ID（群聊为 chatId:userId） */
   sessionId: string
   /** 飞书 chat ID（或 CLI 标识） */
   chatId: string
+  /** 用户标识（飞书 open_id / CLI 固定值） */
+  userId: string
   /** 进度反馈 */
   responder: Responder
 }

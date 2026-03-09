@@ -45,6 +45,7 @@ export class CliAdapter extends BaseAdapter {
         const context: ToolContext = {
           sessionId: 'cli',
           chatId: 'cli',
+          userId: 'cli-user',
           responder: this.responder,
         }
         try {
